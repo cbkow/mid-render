@@ -11,7 +11,7 @@ Each node has its own LiteDB database and collects snapshots of the current "lea
 
 ---
 
-> ![NOTE]
+> [!NOTE] 
 > More advanced docs will come with later revisions, but here are the basics:
 
 ## Installation and Setup
@@ -20,7 +20,7 @@ Getting up and running is very simple. Download the latest `.exe` from releases 
 
 In the settings panel, browse to, or paste a shared directory that every node can access. This directory can be an SMB share on a NAS or a shared folder in a file sync service like LucidLink, Dropbox, Synology Drive, Resilio, Syncthing, or others. This folder will contain the "phonebook" that helps connect nodes and all logs (Mid Render logs and DCC output logs). Press Save.
 
-> ![WARNING]
+> [!WARNING] 
 > This installer opens up the HTTP port 8420 and the UDP port 4243 in the Windows Firewall. Ensure you are comfortable with that before installing.
 
 ![Mid Render Image](docs/images/midrender_EQ0rnOsLs2.png)
@@ -57,7 +57,7 @@ In `plugins/afterEffects` is `MidRender.jsx`. Install this in your Adobe After E
 
 ![Mid Render Image](docs/images/AfterFX_FcOV6mcLiw.png)
 
-> ![Note]
+> [!NOTE] 
 > Chunk size will be honored for all image sequences, but not video outputs. If you are outputting a video, the plugin will automatically set the chunk size to the video's duration so that a single video is rendered (and not multiple video chunks).
 
 ---
