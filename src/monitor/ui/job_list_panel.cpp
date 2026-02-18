@@ -1,0 +1,384 @@
+#include "monitor/ui/job_list_panel.h"
+#include "monitor/ui/style.h"
+#include "monitor/monitor_app.h"
+
+#include <imgui.h>
+#include <ctime>
+#include <cstring>
+#include <algorithm>
+
+namespace MR {
+
+void JobListPanel::init(MonitorApp* app)
+{
+    m_app = app;
+}
+
+static bool isDeletableState(const std::string& state)
+{
+    return state == "completed" || state == "cancelled";
+}
+
+static std::string formatTimestamp(int64_t ms)
+{
+    if (ms <= 0) return "";
+    time_t t = static_cast<time_t>(ms / 1000);
+    struct tm tmBuf;
+#ifdef _WIN32
+    localtime_s(&tmBuf, &t);
+#else
+    localtime_r(&t, &tmBuf);
+#endif
+    char buf[32];
+    std::strftime(buf, sizeof(buf), "%m/%d %H:%M", &tmBuf);
+    return buf;
+}
+
+void JobListPanel::render()
+{
+    if (!visible) return;
+
+    if (ImGui::Begin("Job List", nullptr, ImGuiWindowFlags_NoTitleBar))
+    {
+        panelHeader("Jobs", visible);
+
+        if (!m_app || !m_app->isFarmRunning())
+        {
+            ImGui::TextDisabled("Farm not connected");
+            ImGui::End();
+            return;
+        }
+
+        const auto& jobs = m_app->cachedJobs();
+
+        // New Job button
+        if (ImGui::Button("New Job"))
+            m_app->requestSubmissionMode();
+
+        // Toolbar: bulk action buttons
+        int deletableCount = 0;
+        int cancellableCount = 0;
+        for (const auto& id : m_selectedJobIds)
+        {
+            for (const auto& j : jobs)
+            {
+                if (j.manifest.job_id != id) continue;
+                if (isDeletableState(j.current_state))
+                    ++deletableCount;
+                else if (j.current_state == "active" || j.current_state == "paused")
+                    ++cancellableCount;
+                break;
+            }
+        }
+        if (cancellableCount > 0)
+        {
+            ImGui::SameLine();
+            char cancelLabel[32];
+            snprintf(cancelLabel, sizeof(cancelLabel), "Cancel (%d)", cancellableCount);
+            if (ImGui::Button(cancelLabel))
+                m_pendingBulkCancel = true;
+        }
+        if (deletableCount > 0)
+        {
+            ImGui::SameLine();
+            char delLabel[32];
+            snprintf(delLabel, sizeof(delLabel), "Delete (%d)", deletableCount);
+            if (ImGui::Button(delLabel))
+                m_pendingBulkDelete = true;
+        }
+
+        // Cancel All panic button — visible whenever any job is active/paused
+        int totalActive = 0;
+        for (const auto& j : jobs)
+        {
+            if (j.current_state == "active" || j.current_state == "paused")
+                ++totalActive;
+        }
+        if (totalActive > 0)
+        {
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel All"))
+                m_pendingCancelAll = true;
+        }
+
+        ImGui::SameLine();
+        ImGui::TextDisabled("(%d jobs)", (int)jobs.size());
+
+        ImGui::Separator();
+
+        // Job table
+        if (jobs.empty())
+        {
+            ImGui::TextDisabled("No jobs submitted yet.");
+        }
+        else
+        {
+            ImGuiTableFlags tableFlags =
+                ImGuiTableFlags_Resizable |
+                ImGuiTableFlags_RowBg |
+                ImGuiTableFlags_BordersOuter |
+                ImGuiTableFlags_BordersInnerV |
+                ImGuiTableFlags_ScrollY;
+
+            if (ImGui::BeginTable("##JobTable", 7, tableFlags))
+            {
+                ImGui::TableSetupColumn("Name",      ImGuiTableColumnFlags_WidthStretch, 2.0f);
+                ImGui::TableSetupColumn("Template",   ImGuiTableColumnFlags_WidthStretch, 1.5f);
+                ImGui::TableSetupColumn("State",      ImGuiTableColumnFlags_WidthFixed, 70.0f);
+                ImGui::TableSetupColumn("Progress",   ImGuiTableColumnFlags_WidthStretch, 3.0f);
+                ImGui::TableSetupColumn("Priority",   ImGuiTableColumnFlags_WidthFixed, 55.0f);
+                ImGui::TableSetupColumn("Frames",     ImGuiTableColumnFlags_WidthFixed, 100.0f);
+                ImGui::TableSetupColumn("Submitted",  ImGuiTableColumnFlags_WidthFixed, 100.0f);
+                ImGui::TableSetupScrollFreeze(0, 1);
+                ImGui::TableHeadersRow();
+
+                const ImU32 highlightColor = ImGui::GetColorU32(ImVec4(0.3f, 0.5f, 0.8f, 0.35f));
+
+                for (int i = 0; i < (int)jobs.size(); ++i)
+                {
+                    const auto& job = jobs[i];
+                    const auto& jobId = job.manifest.job_id;
+                    bool inMultiSelect = m_selectedJobIds.count(jobId) > 0;
+
+                    ImGui::PushID(i);
+                    ImGui::TableNextRow();
+
+                    // Row highlight for multi-selected rows
+                    if (inMultiSelect)
+                        ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1, highlightColor);
+
+                    // Name (selectable full row)
+                    ImGui::TableNextColumn();
+                    bool isDetailSelected = (m_app->selectedJobId() == jobId);
+                    if (ImGui::Selectable(jobId.c_str(), isDetailSelected || inMultiSelect,
+                                          ImGuiSelectableFlags_SpanAllColumns))
+                    {
+                        bool ctrl = ImGui::GetIO().KeyCtrl;
+                        bool shift = ImGui::GetIO().KeyShift;
+
+                        if (shift && m_lastClickedIndex >= 0 && m_lastClickedIndex < (int)jobs.size())
+                        {
+                            // Shift+click: select range
+                            int lo = (std::min)(m_lastClickedIndex, i);
+                            int hi = (std::max)(m_lastClickedIndex, i);
+                            if (!ctrl) m_selectedJobIds.clear();
+                            for (int r = lo; r <= hi; ++r)
+                                m_selectedJobIds.insert(jobs[r].manifest.job_id);
+                        }
+                        else if (ctrl)
+                        {
+                            // Ctrl+click: toggle
+                            if (inMultiSelect)
+                                m_selectedJobIds.erase(jobId);
+                            else
+                                m_selectedJobIds.insert(jobId);
+                        }
+                        else
+                        {
+                            // Plain click: single select
+                            m_selectedJobIds.clear();
+                            m_selectedJobIds.insert(jobId);
+                        }
+
+                        m_lastClickedIndex = i;
+                        m_app->selectJob(jobId);
+                    }
+
+                    // Template
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(job.manifest.template_id.c_str());
+
+                    // State (colored)
+                    ImGui::TableNextColumn();
+                    ImVec4 stateColor(1, 1, 1, 1);
+                    if (job.current_state == "active")
+                        stateColor = ImVec4(0.3f, 0.8f, 0.3f, 1.0f);
+                    else if (job.current_state == "paused")
+                        stateColor = ImVec4(0.9f, 0.7f, 0.2f, 1.0f);
+                    else if (job.current_state == "completed")
+                        stateColor = ImVec4(0.4f, 0.6f, 1.0f, 1.0f);
+                    else if (job.current_state == "cancelled")
+                        stateColor = ImVec4(0.6f, 0.6f, 0.6f, 1.0f);
+                    ImGui::TextColored(stateColor, "%s", job.current_state.c_str());
+
+                    // Progress (mini bar + label)
+                    ImGui::TableNextColumn();
+                    if (job.total_chunks > 0)
+                    {
+                        float fraction = static_cast<float>(job.completed_chunks) / static_cast<float>(job.total_chunks);
+                        float avail = ImGui::GetContentRegionAvail().x;
+                        char label[32];
+                        snprintf(label, sizeof(label), "%d/%d", job.completed_chunks, job.total_chunks);
+                        float labelW = ImGui::CalcTextSize(label).x + ImGui::GetStyle().ItemSpacing.x;
+                        float barW = avail - labelW;
+                        if (barW < 40.0f) barW = 40.0f;
+                        float barH = ImGui::GetTextLineHeight() - 2.0f;
+                        float cellY = ImGui::GetCursorPosY();
+                        float barOffset = (ImGui::GetTextLineHeight() - barH) * 0.5f;
+                        ImGui::SetCursorPosY(cellY + barOffset);
+                        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(ImGui::GetStyle().FramePadding.x, 0.0f));
+                        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.3f, 0.7f, 0.3f, 1.0f));
+                        ImGui::ProgressBar(fraction, ImVec2(barW, barH), "");
+                        ImGui::PopStyleColor();
+                        ImGui::PopStyleVar();
+                        ImGui::SameLine();
+                        ImGui::SetCursorPosY(cellY);
+                        ImGui::TextUnformatted(label);
+                    }
+                    else
+                    {
+                        ImGui::TextDisabled("--");
+                    }
+
+                    // Priority
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%d", job.current_priority);
+
+                    // Frames
+                    ImGui::TableNextColumn();
+                    ImGui::Text("%d-%d (x%d)", job.manifest.frame_start, job.manifest.frame_end,
+                        job.manifest.chunk_size);
+
+                    // Submitted
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(formatTimestamp(job.manifest.submitted_at_ms).c_str());
+
+                    ImGui::PopID();
+                }
+                ImGui::EndTable();
+            }
+        }
+
+        // Bulk cancel confirmation popup
+        if (m_pendingBulkCancel)
+        {
+            ImGui::OpenPopup("Confirm Bulk Cancel");
+            m_pendingBulkCancel = false;
+        }
+
+        if (ImGui::BeginPopupModal("Confirm Bulk Cancel", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            ImGui::Text("Cancel %d job%s? Active renders will be aborted.",
+                         cancellableCount, cancellableCount == 1 ? "" : "s");
+
+            ImGui::Spacing();
+            if (ImGui::Button("Cancel Jobs"))
+            {
+                for (const auto& id : m_selectedJobIds)
+                {
+                    for (const auto& j : jobs)
+                    {
+                        if (j.manifest.job_id == id &&
+                            (j.current_state == "active" || j.current_state == "paused"))
+                        {
+                            m_app->cancelJob(id);
+                            break;
+                        }
+                    }
+                }
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Back"))
+                ImGui::CloseCurrentPopup();
+
+            ImGui::EndPopup();
+        }
+
+        // Cancel All confirmation popup
+        if (m_pendingCancelAll)
+        {
+            ImGui::OpenPopup("Confirm Cancel All");
+            m_pendingCancelAll = false;
+        }
+
+        if (ImGui::BeginPopupModal("Confirm Cancel All", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            ImGui::Text("Cancel ALL %d active/paused job%s?",
+                         totalActive, totalActive == 1 ? "" : "s");
+            ImGui::Text("All running renders will be aborted.");
+
+            ImGui::Spacing();
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.9f, 0.3f, 0.3f, 1.0f));
+            if (ImGui::Button("Cancel All Jobs"))
+            {
+                for (const auto& j : jobs)
+                {
+                    if (j.current_state == "active" || j.current_state == "paused")
+                        m_app->cancelJob(j.manifest.job_id);
+                }
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::PopStyleColor(2);
+            ImGui::SameLine();
+            if (ImGui::Button("Back"))
+                ImGui::CloseCurrentPopup();
+
+            ImGui::EndPopup();
+        }
+
+        // Bulk delete confirmation popup
+        if (m_pendingBulkDelete)
+        {
+            ImGui::OpenPopup("Confirm Bulk Delete");
+            m_pendingBulkDelete = false;
+        }
+
+        if (ImGui::BeginPopupModal("Confirm Bulk Delete", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            int bulkDeletable = 0, bulkSkipped = 0;
+            for (const auto& id : m_selectedJobIds)
+            {
+                for (const auto& j : jobs)
+                {
+                    if (j.manifest.job_id == id)
+                    {
+                        if (isDeletableState(j.current_state))
+                            ++bulkDeletable;
+                        else
+                            ++bulkSkipped;
+                        break;
+                    }
+                }
+            }
+
+            ImGui::Text("Delete %d job%s permanently? This cannot be undone.",
+                         bulkDeletable, bulkDeletable == 1 ? "" : "s");
+            if (bulkSkipped > 0)
+                ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.0f, 1.0f),
+                    "%d active/paused job%s will be skipped.",
+                    bulkSkipped, bulkSkipped == 1 ? "" : "s");
+
+            ImGui::Spacing();
+            if (ImGui::Button("Delete"))
+            {
+                std::vector<std::string> toRemove;
+                for (const auto& id : m_selectedJobIds)
+                {
+                    for (const auto& j : jobs)
+                    {
+                        if (j.manifest.job_id == id && isDeletableState(j.current_state))
+                        {
+                            m_app->deleteJob(id);
+                            toRemove.push_back(id);
+                            break;
+                        }
+                    }
+                }
+                for (const auto& id : toRemove)
+                    m_selectedJobIds.erase(id);
+
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel"))
+                ImGui::CloseCurrentPopup();
+
+            ImGui::EndPopup();
+        }
+    }
+    ImGui::End();
+}
+
+} // namespace MR
