@@ -1,9 +1,9 @@
 # Mid Render
-A lightweight render farm coordinator for small/medium VFX teams and freelancers--currently Windows only, but will eventually expand to MacOS and Linux.
+A lightweight render farm coordinator for small/medium VFX teams and freelancers
 
 ![Mid Render Image](docs/images/midrender_iyinJkrW2D.png)
 
-Mid Render is a lightweight C++, Rust, and [Dear ImGUI](https://github.com/ocornut/imgui) render farm coordinator with a simple install process and automated connectivity. It's a self-healing mesh system where each render node can act as a coordinator. If one drops out, another takes its place. It uses UDP for fast handshakes but falls back to a file-system-based "phonebook" to help connect nodes in VPNs and complex network scenarios. Job coordination is over http. 
+Mid Render is a lightweight C++, Rust, and [Dear ImGUI](https://github.com/ocornut/imgui) render farm coordinator with a simple install process and automated connectivity. It's a self-healing mesh system where each render node can act as a coordinator. If one drops out, another takes its place. It uses UDP for fast handshakes but falls back to a file-system-based "phonebook" to help connect nodes in VPNs and complex network scenarios. Job coordination is over http. It's currently Windows-only, but will eventually expand to macOS and Linux.
 
 It has a very simple job template setup that uses JSON templates to launch commands with flags, including regex hints for parsing stdout and tracking progress. It's DCC agnostic. Job templates and DCC submission plugins are included as examples. 
 
