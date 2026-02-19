@@ -88,3 +88,7 @@ When you close the app, it will minimize to the system tray. Running Mid Render 
 ![Mid Render Image](docs/images/explorer_dM0xlpmQs3.png)
 
 ---
+
+## Job Template structure
+
+Job Templates are explained [here](docs/job-templates.md).
