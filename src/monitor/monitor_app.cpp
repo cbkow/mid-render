@@ -28,6 +28,10 @@ bool MonitorApp::init()
     // Apply font scale
     ImGui::GetIO().FontGlobalScale = m_config.font_scale;
 
+    // Restore persisted node state
+    if (m_config.node_stopped)
+        setNodeState(NodeState::Stopped);
+
     // Initialize HTTP server (routes set up before farm starts)
     m_httpServer.init(this);
 
@@ -43,6 +47,9 @@ bool MonitorApp::init()
     // Auto-start agent if configured
     if (m_config.auto_start_agent)
         m_agentSupervisor.spawnAgent();
+
+    // Start background HTTP worker
+    startHttpWorker();
 
     // Initialize dashboard
     m_dashboard.init(this);
@@ -106,127 +113,7 @@ void MonitorApp::update()
     // Poll local submission dropbox
     m_submissionWatcher.poll();
 
-    // --- Worker -> leader HTTP (all gated on shared cooldown) ---
-    // After any failed contact, skip all automatic leader HTTP for 5s
-    // to prevent repeated main-thread blocks when leader is unreachable.
-    auto now2 = std::chrono::steady_clock::now();
-    bool leaderCooldownActive = (now2 < m_leaderContactCooldown);
-
-    // Flush pending completion reports
-    if (!m_pendingReports.empty() && m_farmRunning && !leaderCooldownActive)
-    {
-        std::string leaderEp = getLeaderEndpoint();
-        if (!leaderEp.empty())
-        {
-            auto [host, port] = parseEndpoint(leaderEp);
-            if (!host.empty())
-            {
-                bool anyFailed = false;
-                auto it = m_pendingReports.begin();
-                while (it != m_pendingReports.end())
-                {
-                    try
-                    {
-                        httplib::Client cli(host, port);
-                        cli.set_connection_timeout(0, 500000); // 500ms
-                        cli.set_read_timeout(1);
-
-                        nlohmann::json body = {
-                            {"node_id", m_identity.nodeId()},
-                            {"job_id", it->jobId},
-                            {"frame_start", it->frameStart},
-                            {"frame_end", it->frameEnd},
-                        };
-
-                        std::string endpoint;
-                        if (it->state == "completed")
-                        {
-                            body["elapsed_ms"] = it->elapsedMs;
-                            body["exit_code"] = it->exitCode;
-                            endpoint = "/api/dispatch/complete";
-                        }
-                        else
-                        {
-                            body["error"] = it->error;
-                            endpoint = "/api/dispatch/failed";
-                        }
-
-                        auto res = cli.Post(endpoint, body.dump(), "application/json");
-                        if (res && res->status == 200)
-                        {
-                            it = m_pendingReports.erase(it);
-                            continue;
-                        }
-                        anyFailed = true;
-                        break;
-                    }
-                    catch (...)
-                    {
-                        anyFailed = true;
-                        break;
-                    }
-                    ++it;
-                }
-                if (anyFailed)
-                    m_leaderContactCooldown = std::chrono::steady_clock::now() +
-                                             std::chrono::seconds(5);
-            }
-        }
-    }
-
-    // Flush pending frame completion reports (2s batch interval)
-    if (!m_pendingFrameReports.empty() && m_farmRunning && !leaderCooldownActive)
-    {
-        auto frameElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            now2 - m_lastFrameReportFlush).count();
-        if (frameElapsed >= 2000)
-        {
-            std::string leaderEp = getLeaderEndpoint();
-            if (!leaderEp.empty())
-            {
-                auto [host, port] = parseEndpoint(leaderEp);
-                if (!host.empty())
-                {
-                    std::unordered_map<std::string, std::vector<int>> byJob;
-                    for (const auto& fr : m_pendingFrameReports)
-                        byJob[fr.jobId].push_back(fr.frame);
-
-                    bool allSent = true;
-                    for (auto& [jobId, frames] : byJob)
-                    {
-                        try
-                        {
-                            httplib::Client cli(host, port);
-                            cli.set_connection_timeout(0, 500000); // 500ms
-                            cli.set_read_timeout(1);
-
-                            nlohmann::json body = {
-                                {"node_id", m_identity.nodeId()},
-                                {"job_id", jobId},
-                                {"frames", frames},
-                            };
-
-                            auto res = cli.Post("/api/dispatch/frame-complete",
-                                body.dump(), "application/json");
-                            if (!res || res->status != 200)
-                                allSent = false;
-                        }
-                        catch (...)
-                        {
-                            allSent = false;
-                        }
-                    }
-
-                    if (allSent)
-                        m_pendingFrameReports.clear();
-                    else
-                        m_leaderContactCooldown = std::chrono::steady_clock::now() +
-                                                 std::chrono::seconds(5);
-                }
-            }
-            m_lastFrameReportFlush = now2;
-        }
-    }
+    // Note: completion/frame reports are flushed by the background HTTP worker thread.
 
     // Update render state on PeerManager
     if (m_renderCoordinator.isRendering())
@@ -257,6 +144,7 @@ void MonitorApp::renderUI()
 
 void MonitorApp::shutdown()
 {
+    stopHttpWorker();
     stopFarm();
 
     m_renderCoordinator.abortCurrentRender("shutdown");
@@ -333,6 +221,9 @@ bool MonitorApp::startFarm()
     // Start file logging
     MonitorLog::instance().startFileLogging(m_farmPath, m_identity.nodeId());
     MonitorLog::instance().info("farm", "Farm started at " + m_farmPath.string());
+
+    // Apply staging setting
+    m_renderCoordinator.setStagingEnabled(m_config.staging_enabled);
 
     // Initialize render coordinator with completion callbacks
     m_renderCoordinator.init(m_farmPath, m_identity.nodeId(), getOS(),
@@ -521,12 +412,13 @@ void MonitorApp::reportCompletion(const std::string& jobId, const ChunkRange& ch
     }
     else
     {
-        // Buffer for HTTP delivery to leader
+        // Buffer for HTTP delivery to leader (flushed by worker thread)
         PendingReport report;
         report.jobId = jobId;
         report.frameStart = chunk.frame_start;
         report.frameEnd = chunk.frame_end;
         report.state = state;
+        std::lock_guard<std::mutex> lock(m_reportMutex);
         m_pendingReports.push_back(std::move(report));
     }
 }
@@ -543,6 +435,7 @@ void MonitorApp::reportFrameCompletion(const std::string& jobId, int frame)
     }
     else
     {
+        std::lock_guard<std::mutex> lock(m_reportMutex);
         m_pendingFrameReports.push_back({jobId, frame});
     }
 }
@@ -798,19 +691,7 @@ void MonitorApp::pauseJob(const std::string& jobId)
     }
     else
     {
-        // POST to leader
-        std::string ep = getLeaderEndpoint();
-        if (ep.empty()) return;
-        auto [host, port] = parseEndpoint(ep);
-        if (host.empty()) return;
-        try
-        {
-            httplib::Client cli(host, port);
-            cli.set_connection_timeout(2);
-            cli.set_read_timeout(3);
-            cli.Post("/api/jobs/" + jobId + "/pause", "", "application/json");
-        }
-        catch (...) {}
+        postToLeaderAsync("/api/jobs/" + jobId + "/pause", "");
     }
 }
 
@@ -823,18 +704,7 @@ void MonitorApp::resumeJob(const std::string& jobId)
     }
     else
     {
-        std::string ep = getLeaderEndpoint();
-        if (ep.empty()) return;
-        auto [host, port] = parseEndpoint(ep);
-        if (host.empty()) return;
-        try
-        {
-            httplib::Client cli(host, port);
-            cli.set_connection_timeout(2);
-            cli.set_read_timeout(3);
-            cli.Post("/api/jobs/" + jobId + "/resume", "", "application/json");
-        }
-        catch (...) {}
+        postToLeaderAsync("/api/jobs/" + jobId + "/resume", "");
     }
 }
 
@@ -847,18 +717,7 @@ void MonitorApp::cancelJob(const std::string& jobId)
     }
     else
     {
-        std::string ep = getLeaderEndpoint();
-        if (ep.empty()) return;
-        auto [host, port] = parseEndpoint(ep);
-        if (host.empty()) return;
-        try
-        {
-            httplib::Client cli(host, port);
-            cli.set_connection_timeout(2);
-            cli.set_read_timeout(3);
-            cli.Post("/api/jobs/" + jobId + "/cancel", "", "application/json");
-        }
-        catch (...) {}
+        postToLeaderAsync("/api/jobs/" + jobId + "/cancel", "");
     }
 
     // Abort local render if it's for this job
@@ -891,18 +750,7 @@ void MonitorApp::deleteJob(const std::string& jobId)
     }
     else
     {
-        std::string ep = getLeaderEndpoint();
-        if (ep.empty()) return;
-        auto [host, port] = parseEndpoint(ep);
-        if (host.empty()) return;
-        try
-        {
-            httplib::Client cli(host, port);
-            cli.set_connection_timeout(2);
-            cli.set_read_timeout(3);
-            cli.Delete("/api/jobs/" + jobId);
-        }
-        catch (...) {}
+        postToLeaderAsync("/api/jobs/" + jobId, "", nullptr, "DELETE");
     }
 
     // Clean up shared FS job directory
@@ -928,18 +776,7 @@ void MonitorApp::archiveJob(const std::string& jobId)
     }
     else
     {
-        std::string ep = getLeaderEndpoint();
-        if (ep.empty()) return;
-        auto [host, port] = parseEndpoint(ep);
-        if (host.empty()) return;
-        try
-        {
-            httplib::Client cli(host, port);
-            cli.set_connection_timeout(2);
-            cli.set_read_timeout(3);
-            cli.Post("/api/jobs/" + jobId + "/archive", "", "application/json");
-        }
-        catch (...) {}
+        postToLeaderAsync("/api/jobs/" + jobId + "/archive", "");
     }
 
     if (m_selectedJobId == jobId)
@@ -955,18 +792,7 @@ void MonitorApp::retryFailedChunks(const std::string& jobId)
     }
     else
     {
-        std::string ep = getLeaderEndpoint();
-        if (ep.empty()) return;
-        auto [host, port] = parseEndpoint(ep);
-        if (host.empty()) return;
-        try
-        {
-            httplib::Client cli(host, port);
-            cli.set_connection_timeout(2);
-            cli.set_read_timeout(3);
-            cli.Post("/api/jobs/" + jobId + "/retry-failed", "", "application/json");
-        }
-        catch (...) {}
+        postToLeaderAsync("/api/jobs/" + jobId + "/retry-failed", "");
     }
 }
 
@@ -984,26 +810,7 @@ std::string MonitorApp::resubmitJob(const std::string& jobId)
     }
     else
     {
-        std::string ep = getLeaderEndpoint();
-        if (ep.empty()) return {};
-        auto [host, port] = parseEndpoint(ep);
-        if (host.empty()) return {};
-        try
-        {
-            httplib::Client cli(host, port);
-            cli.set_connection_timeout(2);
-            cli.set_read_timeout(3);
-            auto res = cli.Post("/api/jobs/" + jobId + "/resubmit", "", "application/json");
-            if (res && res->status == 200)
-            {
-                auto body = nlohmann::json::parse(res->body);
-                std::string newId = body.value("job_id", "");
-                if (!newId.empty())
-                    selectJob(newId);
-                return newId;
-            }
-        }
-        catch (...) {}
+        postToLeaderAsync("/api/jobs/" + jobId + "/resubmit", "");
     }
     return {};
 }
@@ -1017,18 +824,7 @@ void MonitorApp::unsuspendNode(const std::string& nodeId)
     }
     else
     {
-        std::string ep = getLeaderEndpoint();
-        if (ep.empty()) return;
-        auto [host, port] = parseEndpoint(ep);
-        if (host.empty()) return;
-        try
-        {
-            httplib::Client cli(host, port);
-            cli.set_connection_timeout(2);
-            cli.set_read_timeout(3);
-            cli.Post("/api/nodes/" + nodeId + "/unsuspend", "", "application/json");
-        }
-        catch (...) {}
+        postToLeaderAsync("/api/nodes/" + nodeId + "/unsuspend", "");
     }
 }
 
@@ -1040,6 +836,7 @@ void MonitorApp::setNodeState(NodeState state)
     if (state == NodeState::Stopped)
     {
         m_renderCoordinator.setStopped(true);
+        m_renderCoordinator.abortCurrentRender("node stopped");
         m_peerManager.setNodeState("stopped");
     }
     else
@@ -1047,6 +844,10 @@ void MonitorApp::setNodeState(NodeState state)
         m_renderCoordinator.setStopped(false);
         m_peerManager.setNodeState("active");
     }
+
+    // Persist across restarts
+    m_config.node_stopped = (state == NodeState::Stopped);
+    saveConfig();
 }
 
 // --- Leader endpoint helper ---
@@ -1249,6 +1050,275 @@ void MonitorApp::sendUdpHeartbeat()
     }
 
     m_udpNotify.send(hb);
+}
+
+// --- Background HTTP worker ---
+
+void MonitorApp::postToLeaderAsync(const std::string& endpoint, const std::string& body,
+                                    std::function<void(bool, const std::string&)> callback,
+                                    const std::string& method)
+{
+    std::string leaderEp = getLeaderEndpoint();
+    if (leaderEp.empty())
+    {
+        if (callback) callback(false, "");
+        return;
+    }
+
+    auto [host, port] = parseEndpoint(leaderEp);
+    if (host.empty())
+    {
+        if (callback) callback(false, "");
+        return;
+    }
+
+    HttpRequest req;
+    req.host = host;
+    req.port = port;
+    req.method = method;
+    req.endpoint = endpoint;
+    req.body = body;
+    req.callback = std::move(callback);
+
+    {
+        std::lock_guard<std::mutex> lock(m_httpQueueMutex);
+        m_httpQueue.push(std::move(req));
+    }
+}
+
+void MonitorApp::startHttpWorker()
+{
+    m_httpWorkerRunning.store(true);
+    m_httpWorkerThread = std::thread(&MonitorApp::httpWorkerLoop, this);
+}
+
+void MonitorApp::stopHttpWorker()
+{
+    m_httpWorkerRunning.store(false);
+    if (m_httpWorkerThread.joinable())
+        m_httpWorkerThread.join();
+}
+
+void MonitorApp::httpWorkerLoop()
+{
+    auto reportCooldown = std::chrono::steady_clock::time_point{};
+    auto lastFrameFlush = std::chrono::steady_clock::now();
+
+    while (m_httpWorkerRunning.load())
+    {
+        // 1. Process one-off requests from queue (job controls, submissions)
+        {
+            std::unique_lock<std::mutex> lock(m_httpQueueMutex);
+            while (!m_httpQueue.empty())
+            {
+                auto req = std::move(m_httpQueue.front());
+                m_httpQueue.pop();
+                lock.unlock();
+
+                bool success = false;
+                std::string response;
+                try
+                {
+                    httplib::Client cli(req.host, req.port);
+                    cli.set_connection_timeout(0, 500000); // 500ms
+                    cli.set_read_timeout(2);
+
+                    httplib::Result res = (req.method == "DELETE")
+                        ? cli.Delete(req.endpoint)
+                        : cli.Post(req.endpoint, req.body, "application/json");
+
+                    if (res)
+                    {
+                        success = (res->status == 200);
+                        response = res->body;
+                    }
+                }
+                catch (...) {}
+
+                if (req.callback)
+                    req.callback(success, response);
+
+                lock.lock();
+            }
+        }
+
+        auto now = std::chrono::steady_clock::now();
+
+        // 2. Flush completion reports (respecting cooldown)
+        if (now >= reportCooldown && m_farmRunning)
+        {
+            if (flushCompletionReports())
+                reportCooldown = now + std::chrono::seconds(5);
+        }
+
+        // 3. Flush frame reports every 2s (respecting cooldown)
+        auto frameElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - lastFrameFlush).count();
+        if (frameElapsed >= 2000 && now >= reportCooldown && m_farmRunning)
+        {
+            if (flushFrameReports())
+                reportCooldown = now + std::chrono::seconds(5);
+            lastFrameFlush = now;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+}
+
+bool MonitorApp::flushCompletionReports()
+{
+    std::vector<PendingReport> batch;
+    {
+        std::lock_guard<std::mutex> lock(m_reportMutex);
+        if (m_pendingReports.empty()) return false;
+        batch = std::move(m_pendingReports);
+        m_pendingReports.clear();
+    }
+
+    std::string leaderEp = getLeaderEndpoint();
+    if (leaderEp.empty())
+    {
+        std::lock_guard<std::mutex> lock(m_reportMutex);
+        m_pendingReports.insert(m_pendingReports.begin(), batch.begin(), batch.end());
+        return false;
+    }
+
+    auto [host, port] = parseEndpoint(leaderEp);
+    if (host.empty())
+    {
+        std::lock_guard<std::mutex> lock(m_reportMutex);
+        m_pendingReports.insert(m_pendingReports.begin(), batch.begin(), batch.end());
+        return false;
+    }
+
+    bool anyFailed = false;
+    std::vector<PendingReport> unsent;
+
+    for (auto& report : batch)
+    {
+        if (anyFailed)
+        {
+            unsent.push_back(std::move(report));
+            continue;
+        }
+
+        try
+        {
+            httplib::Client cli(host, port);
+            cli.set_connection_timeout(0, 500000); // 500ms
+            cli.set_read_timeout(1);
+
+            nlohmann::json body = {
+                {"node_id", m_identity.nodeId()},
+                {"job_id", report.jobId},
+                {"frame_start", report.frameStart},
+                {"frame_end", report.frameEnd},
+            };
+
+            std::string endpoint;
+            if (report.state == "completed")
+            {
+                body["elapsed_ms"] = report.elapsedMs;
+                body["exit_code"] = report.exitCode;
+                endpoint = "/api/dispatch/complete";
+            }
+            else
+            {
+                body["error"] = report.error;
+                endpoint = "/api/dispatch/failed";
+            }
+
+            auto res = cli.Post(endpoint, body.dump(), "application/json");
+            if (!res || res->status != 200)
+            {
+                anyFailed = true;
+                unsent.push_back(std::move(report));
+            }
+        }
+        catch (...)
+        {
+            anyFailed = true;
+            unsent.push_back(std::move(report));
+        }
+    }
+
+    if (!unsent.empty())
+    {
+        std::lock_guard<std::mutex> lock(m_reportMutex);
+        // Prepend unsent reports before any new reports that arrived during flush
+        unsent.insert(unsent.end(),
+            std::make_move_iterator(m_pendingReports.begin()),
+            std::make_move_iterator(m_pendingReports.end()));
+        m_pendingReports = std::move(unsent);
+    }
+
+    return anyFailed;
+}
+
+bool MonitorApp::flushFrameReports()
+{
+    std::vector<PendingFrameReport> batch;
+    {
+        std::lock_guard<std::mutex> lock(m_reportMutex);
+        if (m_pendingFrameReports.empty()) return false;
+        batch = std::move(m_pendingFrameReports);
+        m_pendingFrameReports.clear();
+    }
+
+    std::string leaderEp = getLeaderEndpoint();
+    if (leaderEp.empty())
+    {
+        std::lock_guard<std::mutex> lock(m_reportMutex);
+        m_pendingFrameReports.insert(m_pendingFrameReports.begin(), batch.begin(), batch.end());
+        return false;
+    }
+
+    auto [host, port] = parseEndpoint(leaderEp);
+    if (host.empty())
+    {
+        std::lock_guard<std::mutex> lock(m_reportMutex);
+        m_pendingFrameReports.insert(m_pendingFrameReports.begin(), batch.begin(), batch.end());
+        return false;
+    }
+
+    // Group by job
+    std::unordered_map<std::string, std::vector<int>> byJob;
+    for (const auto& fr : batch)
+        byJob[fr.jobId].push_back(fr.frame);
+
+    bool allSent = true;
+    for (auto& [jobId, frames] : byJob)
+    {
+        try
+        {
+            httplib::Client cli(host, port);
+            cli.set_connection_timeout(0, 500000); // 500ms
+            cli.set_read_timeout(1);
+
+            nlohmann::json body = {
+                {"node_id", m_identity.nodeId()},
+                {"job_id", jobId},
+                {"frames", frames},
+            };
+
+            auto res = cli.Post("/api/dispatch/frame-complete",
+                body.dump(), "application/json");
+            if (!res || res->status != 200)
+                allSent = false;
+        }
+        catch (...)
+        {
+            allSent = false;
+        }
+    }
+
+    if (!allSent)
+    {
+        std::lock_guard<std::mutex> lock(m_reportMutex);
+        m_pendingFrameReports.insert(m_pendingFrameReports.begin(), batch.begin(), batch.end());
+    }
+
+    return !allSent;
 }
 
 } // namespace MR

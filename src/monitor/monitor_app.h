@@ -18,6 +18,8 @@
 
 #include <atomic>
 #include <filesystem>
+#include <functional>
+#include <queue>
 #include <string>
 #include <thread>
 #include <vector>
@@ -74,6 +76,11 @@ public:
     void setNodeState(NodeState state);
     NodeState nodeState() const { return m_nodeState; }
 
+    // Async HTTP to leader (fire-and-forget or with callback)
+    void postToLeaderAsync(const std::string& endpoint, const std::string& body,
+                           std::function<void(bool success, const std::string& response)> callback = nullptr,
+                           const std::string& method = "POST");
+
     // Leader election (delegated to PeerManager)
     bool isLeader() const { return m_peerManager.isLeader(); }
     std::string getLeaderEndpoint() const;
@@ -116,6 +123,13 @@ private:
     void reportFrameCompletion(const std::string& jobId, int frame);
     void handleUdpMessages();
     void sendUdpHeartbeat();
+
+    // Background HTTP worker
+    void startHttpWorker();
+    void stopHttpWorker();
+    void httpWorkerLoop();
+    bool flushCompletionReports();
+    bool flushFrameReports();
 
     std::filesystem::path m_appDataDir;
     std::filesystem::path m_configPath;
@@ -174,7 +188,23 @@ private:
         int frame = 0;
     };
     std::vector<PendingFrameReport> m_pendingFrameReports;
-    std::chrono::steady_clock::time_point m_lastFrameReportFlush;
+
+    // Thread-safe access to pending reports (worker thread flushes them)
+    std::mutex m_reportMutex;
+
+    // Async HTTP queue for one-off requests to leader
+    struct HttpRequest {
+        std::string host;
+        int port = 0;
+        std::string method = "POST";
+        std::string endpoint;
+        std::string body;
+        std::function<void(bool success, const std::string& response)> callback;
+    };
+    std::mutex m_httpQueueMutex;
+    std::queue<HttpRequest> m_httpQueue;
+    std::thread m_httpWorkerThread;
+    std::atomic<bool> m_httpWorkerRunning{false};
 
     // UDP heartbeat timing
     std::chrono::steady_clock::time_point m_lastUdpHeartbeat;

@@ -134,6 +134,11 @@ void RenderCoordinator::setStopped(bool stopped)
     m_stopped = stopped;
 }
 
+void RenderCoordinator::setStagingEnabled(bool enabled)
+{
+    m_stagingEnabled = enabled;
+}
+
 void RenderCoordinator::handleAgentMessage(const std::string& type, const nlohmann::json& j)
 {
     if (!m_activeRender.has_value())
@@ -231,6 +236,11 @@ nlohmann::json RenderCoordinator::buildTaskJson(const JobManifest& manifest, con
     if (cmdIt != manifest.cmd.end())
         executable = cmdIt->second;
 
+    // Determine staging dir from active render (if any)
+    std::string stagingDir;
+    if (m_activeRender.has_value())
+        stagingDir = m_activeRender->stagingDir;
+
     // Build args from flags with token substitution
     std::vector<std::string> args;
     for (const auto& f : manifest.flags)
@@ -238,7 +248,19 @@ nlohmann::json RenderCoordinator::buildTaskJson(const JobManifest& manifest, con
         if (!f.flag.empty())
             args.push_back(substituteTokens(f.flag, chunk));
         if (f.value.has_value())
-            args.push_back(substituteTokens(f.value.value(), chunk));
+        {
+            std::string val = substituteTokens(f.value.value(), chunk);
+
+            // Rewrite output flag paths to staging directory
+            if (!stagingDir.empty() && f.is_output)
+            {
+                fs::path origPath(val);
+                std::string filename = origPath.filename().string();
+                val = (fs::path(stagingDir) / filename).string();
+            }
+
+            args.push_back(val);
+        }
     }
 
     // Build progress spec
@@ -307,6 +329,26 @@ void RenderCoordinator::dispatchChunk(AgentSupervisor& supervisor)
         std::filesystem::create_directories(ar.manifest.output_dir.value(), ec);
         if (ec)
             MonitorLog::instance().warn("render", "Failed to create output dir: " + ar.manifest.output_dir.value() + " (" + ec.message() + ")");
+    }
+
+    // Set up local staging directory if enabled
+    ar.stagingDir.clear();
+    ar.originalOutputDir.clear();
+    if (m_stagingEnabled && ar.manifest.output_dir.has_value() && !ar.manifest.output_dir.value().empty())
+    {
+        auto stagingBase = getAppDataDir() / "staging" / ar.manifest.job_id / ar.chunk.rangeStr();
+        std::error_code ec;
+        std::filesystem::create_directories(stagingBase, ec);
+        if (!ec)
+        {
+            ar.stagingDir = stagingBase.string();
+            ar.originalOutputDir = ar.manifest.output_dir.value();
+            MonitorLog::instance().info("render", "Staging to: " + ar.stagingDir);
+        }
+        else
+        {
+            MonitorLog::instance().warn("render", "Failed to create staging dir: " + stagingBase.string() + " (" + ec.message() + ") — rendering directly to network");
+        }
     }
 
     auto taskJson = buildTaskJson(ar.manifest, ar.chunk);
@@ -424,6 +466,25 @@ void RenderCoordinator::onChunkCompleted(const nlohmann::json& j)
 
     MonitorLog::instance().info("render", "Chunk " + chunk.rangeStr() + " completed for job " + jobId + " (exit_code=" + std::to_string(exit_code) + ", elapsed=" + std::to_string(elapsed_ms) + "ms)");
 
+    // Copy staged files to network output directory
+    if (!ar.stagingDir.empty() && !ar.originalOutputDir.empty())
+    {
+        if (copyStagingFiles(ar.stagingDir, ar.originalOutputDir))
+        {
+            // Clean up staging directory on success
+            std::error_code ec;
+            fs::remove_all(ar.stagingDir, ec);
+            if (ec)
+                MonitorLog::instance().warn("render", "Failed to clean staging dir: " + ar.stagingDir + " (" + ec.message() + ")");
+            else
+                MonitorLog::instance().info("render", "Staging dir cleaned: " + ar.stagingDir);
+        }
+        else
+        {
+            MonitorLog::instance().warn("render", "Some staging files failed to copy — files remain in: " + ar.stagingDir);
+        }
+    }
+
     m_activeRender.reset();
     if (m_completionFn)
         m_completionFn(jobId, chunk, "completed");
@@ -458,6 +519,41 @@ void RenderCoordinator::failChunk(const std::string& error)
     m_activeRender.reset();
     if (m_completionFn)
         m_completionFn(jobId, chunk, "failed");
+}
+
+bool RenderCoordinator::copyStagingFiles(const std::string& stagingDir, const std::string& outputDir)
+{
+    bool allOk = true;
+    std::error_code ec;
+
+    // Ensure destination exists
+    fs::create_directories(outputDir, ec);
+    if (ec)
+    {
+        MonitorLog::instance().error("render", "Failed to create output dir for staging copy: " + outputDir + " (" + ec.message() + ")");
+        return false;
+    }
+
+    for (const auto& entry : fs::directory_iterator(stagingDir, ec))
+    {
+        if (!entry.is_regular_file(ec))
+            continue;
+
+        auto dest = fs::path(outputDir) / entry.path().filename();
+        std::error_code copyEc;
+        fs::copy_file(entry.path(), dest, fs::copy_options::overwrite_existing, copyEc);
+        if (copyEc)
+        {
+            MonitorLog::instance().error("render", "Failed to copy staged file: " + entry.path().string() + " -> " + dest.string() + " (" + copyEc.message() + ")");
+            allOk = false;
+        }
+        else
+        {
+            MonitorLog::instance().info("render", "Staged file copied: " + entry.path().filename().string() + " -> " + outputDir);
+        }
+    }
+
+    return allOk;
 }
 
 } // namespace MR

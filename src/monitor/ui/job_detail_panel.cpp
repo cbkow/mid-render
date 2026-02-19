@@ -484,8 +484,40 @@ void JobDetailPanel::renderSubmissionMode()
 
     ImGui::Separator();
 
+    // Handle async submit result
+    if (m_asyncSubmitting)
+    {
+        std::lock_guard<std::mutex> lock(m_asyncResultMutex);
+        if (m_asyncResult != 0)
+        {
+            m_asyncSubmitting = false;
+            if (m_asyncResult == 1)
+            {
+                MonitorLog::instance().info("job", "Submitted job: " + m_asyncSubmitSlug);
+                m_app->selectJob(m_asyncSubmitSlug);
+                m_mode = DetailMode::Detail;
+                m_detailJobId = m_asyncSubmitSlug;
+                m_hasDetailCache = false;
+                m_detailChunksJobId.clear();
+                m_asyncSubmitSlug.clear();
+                m_asyncResult = 0;
+            }
+            else
+            {
+                m_errors.push_back(m_asyncResultError);
+                m_asyncResultError.clear();
+                m_asyncResult = 0;
+                m_asyncSubmitSlug.clear();
+            }
+        }
+    }
+
     // Submit / Cancel buttons
-    if (ImGui::Button("Submit"))
+    if (m_asyncSubmitting)
+    {
+        ImGui::TextDisabled("Submitting...");
+    }
+    else if (ImGui::Button("Submit"))
     {
         doSubmit();
     }
@@ -549,59 +581,38 @@ void JobDetailPanel::doSubmit()
     if (m_app->isLeader())
     {
         m_app->dispatchManager().submitJob(manifest, m_priority);
+        MonitorLog::instance().info("job", "Submitted job: " + slug);
+
+        // Switch to detail mode for the new job
+        m_app->selectJob(slug);
+        m_mode = DetailMode::Detail;
+        m_detailJobId = slug;
+        m_hasDetailCache = false;
+        m_detailChunksJobId.clear();
     }
     else
     {
-        std::string ep = m_app->getLeaderEndpoint();
-        if (!ep.empty())
-        {
-            auto [host, port] = parseEndpoint(ep);
-            if (!host.empty())
-            {
-                try
-                {
-                    httplib::Client cli(host, port);
-                    cli.set_connection_timeout(3);
-                    cli.set_read_timeout(5);
+        nlohmann::json body = {
+            {"manifest", nlohmann::json(manifest)},
+            {"priority", m_priority},
+        };
 
-                    nlohmann::json body = {
-                        {"manifest", nlohmann::json(manifest)},
-                        {"priority", m_priority},
-                    };
-                    auto res = cli.Post("/api/jobs", body.dump(), "application/json");
-                    if (!res || res->status != 200)
-                    {
-                        m_errors.push_back("Failed to submit job to leader");
-                        return;
-                    }
-                }
-                catch (const std::exception& e)
-                {
-                    m_errors.push_back(std::string("Submit error: ") + e.what());
-                    return;
-                }
-            }
-            else
-            {
-                m_errors.push_back("No leader available");
-                return;
-            }
-        }
-        else
+        m_asyncSubmitting = true;
+        m_asyncSubmitSlug = slug;
         {
-            m_errors.push_back("No leader available");
-            return;
+            std::lock_guard<std::mutex> lock(m_asyncResultMutex);
+            m_asyncResult = 0;
+            m_asyncResultError.clear();
         }
+
+        m_app->postToLeaderAsync("/api/jobs", body.dump(),
+            [this](bool success, const std::string&) {
+                std::lock_guard<std::mutex> lock(m_asyncResultMutex);
+                m_asyncResult = success ? 1 : -1;
+                if (!success)
+                    m_asyncResultError = "Failed to submit job to leader";
+            });
     }
-
-    MonitorLog::instance().info("job", "Submitted job: " + slug);
-
-    // Switch to detail mode for the new job
-    m_app->selectJob(slug);
-    m_mode = DetailMode::Detail;
-    m_detailJobId = slug;
-    m_hasDetailCache = false;
-    m_detailChunksJobId.clear();
 }
 
 // --- Detail Mode ---

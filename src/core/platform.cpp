@@ -90,6 +90,20 @@ void openFolderInExplorer(const std::filesystem::path& folder)
 #endif
 }
 
+void openUrl(const std::string& url)
+{
+#ifdef _WIN32
+    std::wstring wurl(url.begin(), url.end());
+    ShellExecuteW(nullptr, L"open", wurl.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+#elif defined(__APPLE__)
+    std::string cmd = "open \"" + url + "\"";
+    std::system(cmd.c_str());
+#elif defined(__linux__)
+    std::string cmd = "xdg-open \"" + url + "\"";
+    std::system(cmd.c_str());
+#endif
+}
+
 bool addFirewallRule(const std::string& ruleName, uint16_t tcpPort, uint16_t udpPort)
 {
 #ifdef _WIN32

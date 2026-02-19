@@ -1,5 +1,7 @@
 #include "monitor/ui/dashboard.h"
 #include "monitor/monitor_app.h"
+#include "core/platform.h"
+#include "core/config.h"
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -137,6 +139,16 @@ void Dashboard::renderMenuBar()
             ImGui::MenuItem("Job Detail",    nullptr, &m_jobDetailPanel.visible);
             ImGui::MenuItem("Job List",      nullptr, &m_jobListPanel.visible);
             ImGui::MenuItem("Log",           nullptr, &m_logPanel.visible);
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Help"))
+        {
+            if (ImGui::MenuItem("Guide"))
+                openUrl("https://github.com/cbkow/mid-render");
+            if (ImGui::MenuItem("Check for Updates"))
+                openUrl("https://github.com/cbkow/mid-render/releases");
+            ImGui::Separator();
+            ImGui::TextDisabled("v%s", APP_VERSION);
             ImGui::EndMenu();
         }
         ImGui::EndMenuBar();

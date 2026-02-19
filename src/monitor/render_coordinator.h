@@ -46,6 +46,7 @@ public:
     void purgeJob(const std::string& jobId);  // Remove queued (not yet active) chunks for a job
     void setStopped(bool stopped);
     bool isStopped() const { return m_stopped; }
+    void setStagingEnabled(bool enabled);
 
     // UI queries
     bool isRendering() const { return m_activeRender.has_value(); }
@@ -69,6 +70,9 @@ private:
     void onChunkFailed(const nlohmann::json& j);
     void failChunk(const std::string& error);
 
+    // Staging helpers
+    bool copyStagingFiles(const std::string& stagingDir, const std::string& outputDir);
+
     // Dispatch queue (DispatchManager → main thread)
     struct PendingDispatch
     {
@@ -89,6 +93,8 @@ private:
         std::vector<std::string> stdoutBuffer;
         std::string stdoutLogName;  // "{rangeStr}_{timestamp_ms}.log" — set once at dispatch
         std::set<int> completedFrames;
+        std::string stagingDir;        // local staging dir for this chunk (empty if staging disabled)
+        std::string originalOutputDir; // original manifest.output_dir to copy back to
     };
     std::optional<ActiveRender> m_activeRender;
 
@@ -100,6 +106,7 @@ private:
     FrameCompletionCallback m_frameCompletionFn;
     AgentSupervisor* m_supervisor = nullptr;
     bool m_stopped = false;
+    bool m_stagingEnabled = false;
 };
 
 } // namespace MR

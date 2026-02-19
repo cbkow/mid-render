@@ -3,6 +3,7 @@
 #include "monitor/database_manager.h"
 #include "monitor/peer_manager.h"
 #include "core/monitor_log.h"
+#include "core/platform.h"
 
 #include <imgui.h>
 #include <set>
@@ -45,6 +46,8 @@ void FarmCleanupDialog::scanItems()
     m_archivedJobs.clear();
     m_orphanedDirs.clear();
     m_stalePeers.clear();
+    m_staleStagingDirs.clear();
+    m_failedStagingCopies.clear();
 
     if (!m_app || !m_app->isFarmRunning())
         return;
@@ -140,6 +143,60 @@ void FarmCleanupDialog::scanItems()
                 detail,
                 false
             });
+        }
+    }
+
+    // Section 5 & 6: Local staging directories
+    {
+        auto stagingRoot = getAppDataDir() / "staging";
+        std::error_code ec;
+        if (fs::is_directory(stagingRoot, ec))
+        {
+            for (const auto& jobEntry : fs::directory_iterator(stagingRoot, ec))
+            {
+                if (!jobEntry.is_directory(ec)) continue;
+                std::string jobName = jobEntry.path().filename().string();
+
+                // Count files and total size recursively
+                int fileCount = 0;
+                uintmax_t totalSize = 0;
+                for (const auto& f : fs::recursive_directory_iterator(jobEntry.path(), ec))
+                {
+                    if (f.is_regular_file(ec))
+                    {
+                        fileCount++;
+                        totalSize += f.file_size(ec);
+                    }
+                }
+
+                if (fileCount > 0)
+                {
+                    // Format size
+                    std::string sizeStr;
+                    if (totalSize < 1024 * 1024)
+                        sizeStr = std::to_string(totalSize / 1024) + " KB";
+                    else if (totalSize < 1024ULL * 1024 * 1024)
+                        sizeStr = std::to_string(totalSize / (1024 * 1024)) + " MB";
+                    else
+                        sizeStr = std::to_string(totalSize / (1024ULL * 1024 * 1024)) + " GB";
+
+                    m_failedStagingCopies.push_back({
+                        jobEntry.path().string(),
+                        jobName,
+                        std::to_string(fileCount) + " files (" + sizeStr + ")",
+                        false
+                    });
+                }
+                else
+                {
+                    m_staleStagingDirs.push_back({
+                        jobEntry.path().string(),
+                        jobName,
+                        "empty",
+                        false
+                    });
+                }
+            }
         }
     }
 
@@ -283,6 +340,48 @@ void FarmCleanupDialog::removePeersSelected()
     }
 }
 
+void FarmCleanupDialog::deleteStaleStagingSelected()
+{
+    for (auto it = m_staleStagingDirs.begin(); it != m_staleStagingDirs.end(); )
+    {
+        if (it->selected)
+        {
+            std::error_code ec;
+            fs::remove_all(fs::path(it->id), ec);
+            if (ec)
+                MonitorLog::instance().warn("farm", "Failed to remove stale staging dir: " + ec.message());
+            else
+                MonitorLog::instance().info("farm", "Removed stale staging dir: " + it->label);
+            it = m_staleStagingDirs.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+}
+
+void FarmCleanupDialog::deleteFailedStagingSelected()
+{
+    for (auto it = m_failedStagingCopies.begin(); it != m_failedStagingCopies.end(); )
+    {
+        if (it->selected)
+        {
+            std::error_code ec;
+            fs::remove_all(fs::path(it->id), ec);
+            if (ec)
+                MonitorLog::instance().warn("farm", "Failed to remove staging copy dir: " + ec.message());
+            else
+                MonitorLog::instance().info("farm", "Removed failed staging copy: " + it->label);
+            it = m_failedStagingCopies.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+}
+
 void FarmCleanupDialog::render()
 {
     if (m_shouldOpen)
@@ -325,9 +424,10 @@ void FarmCleanupDialog::render()
         scanItems();
     ImGui::SameLine();
     if (m_hasScanned)
-        ImGui::Text("Found: %d finished, %d archived, %d orphaned, %d stale",
+        ImGui::Text("Found: %d finished, %d archived, %d orphaned, %d stale peers, %d staging",
             (int)m_finishedJobs.size(), (int)m_archivedJobs.size(),
-            (int)m_orphanedDirs.size(), (int)m_stalePeers.size());
+            (int)m_orphanedDirs.size(), (int)m_stalePeers.size(),
+            (int)(m_staleStagingDirs.size() + m_failedStagingCopies.size()));
     else
         ImGui::TextDisabled("Click Scan to search for cleanup items");
 
@@ -483,14 +583,14 @@ section4:
             // Section 4: Stale Peers
             {
                 if (!ImGui::CollapsingHeader("Stale Peers", ImGuiTreeNodeFlags_DefaultOpen))
-                    goto sectionEnd;
+                    goto section5;
 
                 ImGui::Indent(8.0f);
                 if (m_stalePeers.empty())
                 {
                     ImGui::TextDisabled("None");
                     ImGui::Unindent(8.0f);
-                    goto sectionEnd;
+                    goto section5;
                 }
 
                 {
@@ -518,6 +618,99 @@ section4:
                     std::string btn = "Remove Selected (" + std::to_string(cnt) + ")##peers";
                     if (ImGui::Button(btn.c_str()))
                         removePeersSelected();
+                    ImGui::EndDisabled();
+                }
+                ImGui::Unindent(8.0f);
+            }
+
+section5:
+            // Section 5: Stale Staging Directories
+            {
+                if (!ImGui::CollapsingHeader("Stale Staging Directories", ImGuiTreeNodeFlags_DefaultOpen))
+                    goto section6;
+
+                ImGui::Indent(8.0f);
+                if (m_staleStagingDirs.empty())
+                {
+                    ImGui::TextDisabled("None");
+                    ImGui::Unindent(8.0f);
+                    goto section6;
+                }
+
+                ImGui::TextDisabled("Empty staging folders left behind by aborted or crashed renders.");
+
+                {
+                    bool allSel = true;
+                    for (const auto& item : m_staleStagingDirs) if (!item.selected) { allSel = false; break; }
+                    if (ImGui::Checkbox("Select All##stale_staging", &allSel))
+                        for (auto& item : m_staleStagingDirs) item.selected = allSel;
+                }
+
+                for (size_t i = 0; i < m_staleStagingDirs.size(); ++i)
+                {
+                    auto& item = m_staleStagingDirs[i];
+                    std::string cbId = "##stg_s" + std::to_string(i);
+                    ImGui::Checkbox(cbId.c_str(), &item.selected);
+                    ImGui::SameLine();
+                    ImGui::Text("%s", item.label.c_str());
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("(%s)", item.detail.c_str());
+                }
+
+                {
+                    int cnt = 0;
+                    for (const auto& it : m_staleStagingDirs) if (it.selected) cnt++;
+                    ImGui::BeginDisabled(cnt == 0);
+                    std::string btn = "Delete Selected (" + std::to_string(cnt) + ")##stg_s";
+                    if (ImGui::Button(btn.c_str()))
+                        deleteStaleStagingSelected();
+                    ImGui::EndDisabled();
+                }
+                ImGui::Unindent(8.0f);
+            }
+
+section6:
+            // Section 6: Failed Staging Copies
+            {
+                if (!ImGui::CollapsingHeader("Failed Staging Copies", ImGuiTreeNodeFlags_DefaultOpen))
+                    goto sectionEnd;
+
+                ImGui::Indent(8.0f);
+                if (m_failedStagingCopies.empty())
+                {
+                    ImGui::TextDisabled("None");
+                    ImGui::Unindent(8.0f);
+                    goto sectionEnd;
+                }
+
+                ImGui::TextDisabled("Staging folders with render output that was not copied to the network path.");
+                ImGui::TextDisabled("Check these files before deleting — you may want to copy them manually.");
+
+                {
+                    bool allSel = true;
+                    for (const auto& item : m_failedStagingCopies) if (!item.selected) { allSel = false; break; }
+                    if (ImGui::Checkbox("Select All##failed_staging", &allSel))
+                        for (auto& item : m_failedStagingCopies) item.selected = allSel;
+                }
+
+                for (size_t i = 0; i < m_failedStagingCopies.size(); ++i)
+                {
+                    auto& item = m_failedStagingCopies[i];
+                    std::string cbId = "##stg_f" + std::to_string(i);
+                    ImGui::Checkbox(cbId.c_str(), &item.selected);
+                    ImGui::SameLine();
+                    ImGui::Text("%s", item.label.c_str());
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("(%s)", item.detail.c_str());
+                }
+
+                {
+                    int cnt = 0;
+                    for (const auto& it : m_failedStagingCopies) if (it.selected) cnt++;
+                    ImGui::BeginDisabled(cnt == 0);
+                    std::string btn = "Delete Selected (" + std::to_string(cnt) + ")##stg_f";
+                    if (ImGui::Button(btn.c_str()))
+                        deleteFailedStagingSelected();
                     ImGui::EndDisabled();
                 }
                 ImGui::Unindent(8.0f);

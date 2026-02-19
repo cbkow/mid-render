@@ -2,7 +2,7 @@
 ; https://jrsoftware.org/isinfo.php
 
 #define MyAppName "MidRender"
-#define MyAppVersion "0.2.3"
+#define MyAppVersion "0.2.5"
 #define MyAppPublisher "cbkow"
 #define MyAppURL "https://github.com/cbkow/midrender"
 #define MyAppExeName "midrender.exe"

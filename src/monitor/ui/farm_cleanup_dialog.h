@@ -31,6 +31,8 @@ private:
     void deleteArchivedSelected();
     void deleteOrphansSelected();
     void removePeersSelected();
+    void deleteStaleStagingSelected();
+    void deleteFailedStagingSelected();
 
     MonitorApp* m_app = nullptr;
     bool m_shouldOpen = false;
@@ -41,6 +43,8 @@ private:
     std::vector<CleanupItem> m_archivedJobs;   // archived -> permanently deletable
     std::vector<CleanupItem> m_orphanedDirs;   // job dirs on shared FS not in DB
     std::vector<CleanupItem> m_stalePeers;     // peers with is_alive == false
+    std::vector<CleanupItem> m_staleStagingDirs;    // empty staging dirs (aborts/crashes)
+    std::vector<CleanupItem> m_failedStagingCopies; // staging dirs with files (copy failed)
 };
 
 } // namespace MR

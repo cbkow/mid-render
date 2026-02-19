@@ -117,6 +117,7 @@ struct ManifestFlag
 {
     std::string flag;
     std::optional<std::string> value;
+    bool is_output = false;
 };
 
 struct JobManifest
@@ -460,6 +461,8 @@ inline void to_json(nlohmann::json& j, const ManifestFlag& f)
         {"flag", f.flag},
         {"value", f.value.has_value() ? nlohmann::json(f.value.value()) : nlohmann::json(nullptr)},
     };
+    if (f.is_output)
+        j["is_output"] = true;
 }
 
 inline void from_json(const nlohmann::json& j, ManifestFlag& f)
@@ -469,6 +472,7 @@ inline void from_json(const nlohmann::json& j, ManifestFlag& f)
         f.value = j.at("value").get<std::string>();
     else if (j.contains("value") && j.at("value").is_null())
         f.value = std::nullopt;
+    if (j.contains("is_output")) j.at("is_output").get_to(f.is_output);
 }
 
 inline void to_json(nlohmann::json& j, const JobManifest& m)

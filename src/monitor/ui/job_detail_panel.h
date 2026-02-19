@@ -7,6 +7,7 @@
 #include <vector>
 #include <array>
 #include <chrono>
+#include <mutex>
 
 namespace MR {
 
@@ -64,6 +65,13 @@ private:
     std::string m_detailChunksJobId;
     std::string m_detailChunksLastState;  // detect state transitions for final refresh
     std::chrono::steady_clock::time_point m_lastChunkRefresh;
+
+    // Async submission state (worker → leader)
+    bool m_asyncSubmitting = false;
+    std::string m_asyncSubmitSlug;
+    std::mutex m_asyncResultMutex;
+    int m_asyncResult = 0;  // 0=pending, 1=success, -1=fail
+    std::string m_asyncResultError;
 };
 
 } // namespace MR

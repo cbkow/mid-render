@@ -48,6 +48,7 @@ void SettingsPanel::loadFromConfig()
     m_udpEnabled = cfg.udp_enabled;
     m_udpPort = static_cast<int>(cfg.udp_port);
     m_showNotifications = cfg.show_notifications;
+    m_stagingEnabled = cfg.staging_enabled;
     m_fontScale = cfg.font_scale;
     m_savedSyncRoot = cfg.sync_root;
 }
@@ -76,6 +77,7 @@ void SettingsPanel::applyToConfig()
     cfg.udp_enabled = m_udpEnabled;
     cfg.udp_port = static_cast<uint16_t>(m_udpPort);
     cfg.show_notifications = m_showNotifications;
+    cfg.staging_enabled = m_stagingEnabled;
     cfg.font_scale = m_fontScale;
 
     ImGui::GetIO().FontGlobalScale = m_fontScale;
@@ -273,6 +275,15 @@ void SettingsPanel::render()
         ImGui::Separator();
     }
 
+    // --- Rendering ---
+    if (ImGui::CollapsingHeader("Rendering", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        ImGui::Checkbox("Local Staging Area", &m_stagingEnabled);
+        ImGui::TextDisabled("Render to a local temp folder, then copy to the network output path.");
+        ImGui::TextDisabled("Prevents file corruption from cloud sync (Synology Drive, Dropbox, etc.).");
+        ImGui::Separator();
+    }
+
     // --- Tags ---
     if (ImGui::CollapsingHeader("Node Tags"))
     {
@@ -347,6 +358,9 @@ void SettingsPanel::render()
 
         applyToConfig();
         m_app->saveConfig();
+
+        // Staging takes effect on the next chunk — no farm restart needed
+        m_app->renderCoordinator().setStagingEnabled(cfg.staging_enabled);
 
         bool needsRestart = (cfg.sync_root != oldSyncRoot) ||
                             (cfg.http_port != oldPort) ||

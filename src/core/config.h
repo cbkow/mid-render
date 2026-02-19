@@ -34,6 +34,12 @@ struct Config
     // UI preferences
     bool show_notifications = true;
     float font_scale = 1.0f;
+
+    // Rendering
+    bool staging_enabled = false;
+
+    // Persisted node state
+    bool node_stopped = false;
 };
 
 // JSON serialization
@@ -50,6 +56,8 @@ inline void to_json(nlohmann::json& j, const Config& c)
         {"udp_port", c.udp_port},
         {"show_notifications", c.show_notifications},
         {"font_scale", c.font_scale},
+        {"staging_enabled", c.staging_enabled},
+        {"node_stopped", c.node_stopped},
     };
 }
 
@@ -65,13 +73,15 @@ inline void from_json(const nlohmann::json& j, Config& c)
     if (j.contains("udp_port"))          c.udp_port = j.at("udp_port").get<uint16_t>();
     if (j.contains("show_notifications")) j.at("show_notifications").get_to(c.show_notifications);
     if (j.contains("font_scale"))         j.at("font_scale").get_to(c.font_scale);
+    if (j.contains("staging_enabled"))    j.at("staging_enabled").get_to(c.staging_enabled);
+    if (j.contains("node_stopped"))       j.at("node_stopped").get_to(c.node_stopped);
 }
 
 // --- Constants ---
 constexpr uint32_t PROTOCOL_VERSION = 2;
 
 #ifndef APP_VERSION
-#define APP_VERSION "0.2.3"
+#define APP_VERSION "0.2.5"
 #endif
 
 } // namespace MR

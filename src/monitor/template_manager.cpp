@@ -489,6 +489,7 @@ JobManifest TemplateManager::bakeManifestStatic(
 
         ManifestFlag mf;
         mf.flag = tf.flag;
+        mf.is_output = (tf.type == "output");
 
         if (tf.editable && i < flagValues.size())
             mf.value = flagValues[i];
