@@ -18,10 +18,10 @@ Each node has its own LiteDB database and collects snapshots of the current "lea
 
 Getting up and running is very simple. Download the latest `.exe` from releases and install on every node.
 
-In the settings panel, browse to, or paste a shared directory that every node can access. This directory can be an SMB share on a NAS or a shared folder in a file sync service like LucidLink, Dropbox, Synology Drive, Resilio, Syncthing, or others. This folder will contain the "phonebook" that helps connect nodes and all logs (Mid Render logs and DCC output logs). Press Save.
-
 > [!WARNING]
-> This installer opens up the HTTP port 8420 and the UDP port 4243 in the Windows Firewall.
+> This installer opens up the HTTP port 8420 and the UDP port 4243 in the Windows Firewall. It also installs a shortcut in your startup folder.
+
+In the settings panel, browse to, or paste a shared directory that every node can access. This directory can be an SMB share on a NAS or a shared folder in a file sync service like LucidLink, Dropbox, Synology Drive, Resilio, Syncthing, or others. This folder will contain the "phonebook" that helps connect nodes and all logs (Mid Render logs and DCC output logs). Press Save.
 
 ![Mid Render Image](docs/images/midrender_EQ0rnOsLs2.png)
 
