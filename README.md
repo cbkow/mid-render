@@ -78,6 +78,9 @@ It will pull render paths and frame ranges from your user settings, but you can 
 
 ![Mid Render Image](docs/images/Cinema_4D_0cGq7BI1CC.png)
 
+> [!NOTE]
+> I only have one C4d license right now, so I have only been able to test this on one machine. It should work fine distributed on the farm though (famous last words).
+
 ## Mimimize to tray
 
 When you close the app, it will minimize to the system tray. Running Mid Render minimized on your nodes is reccomended--it disengages window drawing. It releases resources to a minimal state, keeping only basic communication, coordination, and a lightweight Rust agent to manage CMD processes.
