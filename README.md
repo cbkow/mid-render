@@ -1,5 +1,5 @@
 # Mid Render
-A lightweight render farm coordinator for small/medium VFX teams and freelancers. Currently Windows only, but will eventually expand to MacOS and Linux.
+A lightweight render farm coordinator for small/medium VFX teams and freelancers--currently Windows only, but will eventually expand to MacOS and Linux.
 
 ![Mid Render Image](docs/images/midrender_iyinJkrW2D.png)
 
