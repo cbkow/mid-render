@@ -3,7 +3,7 @@ A lightweight render farm coordinator for small/medium VFX teams and freelancers
 
 ![Mid Render Image](docs/images/midrender_iyinJkrW2D.png)
 
-Mid Render is a lightweight render farm coordinator with a simple install process and automated connectivity. It's a self-healing mesh system where each render node can act as a coordinator. If one drops out, another takes its place. It uses UDP for fast handshakes but falls back to a file-system-based "phonebook" to help connect nodes in VPNs and complex network scenarios. Job coordination is over http. 
+Mid Render is a lightweight C++, Rust, and [Dear ImGUI](https://github.com/ocornut/imgui) render farm coordinator with a simple install process and automated connectivity. It's a self-healing mesh system where each render node can act as a coordinator. If one drops out, another takes its place. It uses UDP for fast handshakes but falls back to a file-system-based "phonebook" to help connect nodes in VPNs and complex network scenarios. Job coordination is over http. 
 
 It has a very simple job template setup that uses JSON templates to launch commands with flags, including regex hints for parsing stdout and tracking progress. It's DCC agnostic. Job templates and DCC submission plugins are included as examples. 
 
@@ -11,7 +11,7 @@ Each node has its own LiteDB database and collects snapshots of the current "lea
 
 ---
 
-> ![NOTE]
+> [!NOTE]
 > More advanced docs will come with later revisions, but here are the basics:
 
 ## Installation and Setup
@@ -20,7 +20,7 @@ Getting up and running is very simple. Download the latest `.exe` from releases 
 
 In the settings panel, browse to, or paste a shared directory that every node can access. This directory can be an SMB share on a NAS or a shared folder in a file sync service like LucidLink, Dropbox, Synology Drive, Resilio, Syncthing, or others. This folder will contain the "phonebook" that helps connect nodes and all logs (Mid Render logs and DCC output logs). Press Save.
 
-> ![WARNING]
+> [!WARNING]
 > This installer opens up the HTTP port 8420 and the UDP port 4243 in the Windows Firewall. Ensure you are comfortable with that before installing.
 
 ![Mid Render Image](docs/images/midrender_EQ0rnOsLs2.png)
@@ -57,7 +57,7 @@ In `plugins/afterEffects` is `MidRender.jsx`. Install this in your Adobe After E
 
 ![Mid Render Image](docs/images/AfterFX_FcOV6mcLiw.png)
 
-> ![Note]
+> [!NOTE]
 > Chunk size will be honored for all image sequences, but not video outputs. If you are outputting a video, the plugin will automatically set the chunk size to the video's duration so that a single video is rendered (and not multiple video chunks).
 
 ---
@@ -69,4 +69,11 @@ The MidRender submitter will automatically collect your render output frame rang
 ![Mid Render Image](docs/images/blender_RQADDXgy9f.png)
 
 ---
+
+## Mimimize to tray
+
+When you close the app, it will minimize to the system tray. Running in minimized state is the recommended state to keep Mid Render on your nodes--it disengages window drawing. It releases resources to a minimal state, keeping only basic communication, coordination, and a lightweight Rust agent to manage CMD processes.
+
+![Mid Render Image](docs/images/blender_RQADDXgy9f.png)
+
 
