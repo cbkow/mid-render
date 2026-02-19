@@ -57,6 +57,8 @@ If you render to a synced folder setup (LucidLink, Dropbox, etc.), you'll want t
 
 ![MidRender Tags](docs/images/midrender_bu9J9djzIL.png)
 
+---
+
 ## DCC Submitters
 
 You can submit jobs directly from the MidRender app, or use the optional DCC plugins. Plugin files are in the shared farm folder under `plugins/`.
