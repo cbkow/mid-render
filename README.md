@@ -7,7 +7,7 @@ Mid Render is a lightweight C++, Rust, and [Dear ImGUI](https://github.com/ocorn
 
 It has a very simple job template setup that uses JSON templates to launch commands with flags, including regex hints for parsing stdout and tracking progress. It's DCC agnostic. Job templates and DCC submission plugins are included as examples. 
 
-Each node has its own LiteDB database and collects snapshots of the current "leaders" state every 30 seconds. If the current leader drops out, a new leader takes over. The worst-case scenario: Frames rendered in the last 30 seconds will be re-rendered..
+Each node has its own LiteDB database and collects snapshots of the current "leaders" state every 30 seconds. If the current leader drops out, a new leader takes over. The worst-case scenario: Frames rendered in the last 30 seconds will be re-rendered.
 
 ---
 
@@ -57,7 +57,8 @@ In `plugins/afterEffects` is `MidRender.jsx`. Install this in your Adobe After E
 
 ![Mid Render Image](docs/images/AfterFX_FcOV6mcLiw.png)
 
-> [!NOTE]
+
+> [!NOTE] 
 > Chunk size will be honored for all image sequences, but not video outputs. If you are outputting a video, the plugin will automatically set the chunk size to the video's duration so that a single video is rendered (and not multiple video chunks).
 
 ---
