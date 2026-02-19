@@ -51,6 +51,12 @@ Tags control which DCCs each node can render and influence leader election. Set 
 
 ---
 
+## Local Staging Area
+
+If you render to a synced folder setup (LucidLink, Dropbox, etc.), you'll want this option checked in the settings panel. Instead of rendering directly to the synced folder, it will create a temp staging area in `%localappdata%\MidRender`, render there, then move files to your final render folder. By staging renders like this, you avoid classic file contention issues on synced file services. 
+
+![MidRender Tags](docs/images/midrender_bu9J9djzIL.png)
+
 ## DCC Submitters
 
 You can submit jobs directly from the MidRender app, or use the optional DCC plugins. Plugin files are in the shared farm folder under `plugins/`.
