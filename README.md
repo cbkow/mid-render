@@ -62,8 +62,6 @@ In `plugins/afterEffects` is `MidRender.jsx`. Install this in your Adobe After E
 > [!NOTE] 
 > Chunk size will be honored for all image sequences, but not video outputs. If you are outputting a video, the plugin will automatically set the chunk size to the video's duration so that a single video is rendered (and not multiple video chunks).
 
----
-
 #### Blender
 
 To install the Blender submitter, use `Install from disk` in the `Add-ons` setting panel. The plugin will appear in the Render panels.
@@ -71,8 +69,6 @@ To install the Blender submitter, use `Install from disk` in the `Add-ons` setti
 The MidRender submitter will automatically collect your render output frame range and output settings from the app, but you can toggle and adjust them for export. Press `Submit to Farm`.
 
 ![Mid Render Image](docs/images/blender_RQADDXgy9f.png)
-
----
 
 #### Cinema 4D
 
