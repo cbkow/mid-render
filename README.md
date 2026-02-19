@@ -21,7 +21,7 @@ Getting up and running is very simple. Download the latest `.exe` from releases 
 In the settings panel, browse to, or paste a shared directory that every node can access. This directory can be an SMB share on a NAS or a shared folder in a file sync service like LucidLink, Dropbox, Synology Drive, Resilio, Syncthing, or others. This folder will contain the "phonebook" that helps connect nodes and all logs (Mid Render logs and DCC output logs). Press Save.
 
 > [!WARNING]
-> This installer opens up the HTTP port 8420 and the UDP port 4243 in the Windows Firewall. Ensure you are comfortable with that before installing.
+> This installer opens up the HTTP port 8420 and the UDP port 4243 in the Windows Firewall.
 
 ![Mid Render Image](docs/images/midrender_EQ0rnOsLs2.png)
 
