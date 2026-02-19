@@ -73,7 +73,7 @@ The MidRender submitter will automatically collect your render output frame rang
 
 ## Mimimize to tray
 
-When you close the app, it will minimize to the system tray. Running in minimized state is the recommended state to keep Mid Render on your nodes--it disengages window drawing. It releases resources to a minimal state, keeping only basic communication, coordination, and a lightweight Rust agent to manage CMD processes.
+When you close the app, it will minimize to the system tray. Running Mid Render minimized on your nodes is reccomended--it disengages window drawing. It releases resources to a minimal state, keeping only basic communication, coordination, and a lightweight Rust agent to manage CMD processes.
 
 ![Mid Render Image](docs/images/explorer_dM0xlpmQs3.png)
 
