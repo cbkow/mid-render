@@ -1,13 +1,21 @@
-# Mid Render
-A lightweight render farm coordinator for small/medium VFX teams and freelancers
+# MidRender
 
-![Mid Render Image](docs/images/midrender_iyinJkrW2D.png)
+A lightweight render farm coordinator for small/medium VFX teams and freelancers.
 
-Mid Render is a lightweight C++, Rust, and [Dear ImGUI](https://github.com/ocornut/imgui) render farm coordinator with a simple install process and automated connectivity. It's a self-healing mesh system where each render node can act as a coordinator. If one drops out, another takes its place. It uses UDP for fast handshakes but falls back to a file-system-based "phonebook" to help connect nodes in VPNs and complex network scenarios. Job coordination is over http. It's currently Windows-only, but will eventually expand to macOS and Linux.
+![MidRender](docs/images/midrender_iyinJkrW2D.png)
 
-It has a very simple job template setup that uses JSON templates to launch commands with flags, including regex hints for parsing stdout and tracking progress. It's DCC agnostic. Job templates and DCC submission plugins are included as examples. 
+## Features
 
-Each node has its own LiteDB database and collects snapshots of the current "leaders" state every 30 seconds. If the current leader drops out, a new leader takes over. The worst-case scenario: Frames rendered in the last 30 seconds will be re-rendered.
+- **Self-healing mesh** — every node can act as coordinator. If the leader drops, another takes over automatically.
+- **DCC agnostic** — JSON templates define how to launch any renderer. Ships with Blender, Cinema 4D, and After Effects templates + submission plugins.
+- **Simple setup** — install, point every node at a shared folder, done.
+- **Fast discovery** — UDP multicast for LAN, falls back to a file-system phonebook for VPNs and complex networks.
+- **HTTP coordination** — job dispatch, progress tracking, and completion reporting over an HTTP mesh.
+- **Local staging** — opt-in render-to-local-then-copy mode to prevent file corruption from cloud sync tools (Synology Drive, Dropbox, etc.).
+- **Resilient** — each node keeps a SQLite snapshot of the leader's state. If the leader drops, a new one picks up where it left off. Worst case: frames rendered in the last 30 seconds get re-rendered.
+- **Windows-first** — macOS and Linux support planned.
+
+Built with C++, Rust, and [Dear ImGui](https://github.com/ocornut/imgui).
 
 ---
 
@@ -16,79 +24,73 @@ Each node has its own LiteDB database and collects snapshots of the current "lea
 
 ## Installation and Setup
 
-Getting up and running is very simple. Download the latest `.exe` from releases and install on every node.
+Download the latest `.exe` from releases and install on every node.
 
 > [!WARNING]
-> This installer opens up the HTTP port 8420 and the UDP port 4243 in the Windows Firewall. It also installs a shortcut in your startup folder.
+> The installer opens HTTP port 8420 and UDP port 4243 in the Windows Firewall. It also installs a shortcut in your startup folder.
 
-In the settings panel, browse to, or paste a shared directory that every node can access. This directory can be an SMB share on a NAS or a shared folder in a file sync service like LucidLink, Dropbox, Synology Drive, Resilio, Syncthing, or others. This folder will contain the "phonebook" that helps connect nodes and all logs (Mid Render logs and DCC output logs). Press Save.
+In the settings panel, browse to or paste a shared directory that every node can access. This can be an SMB share on a NAS or a shared folder in a file sync service like LucidLink, Dropbox, Synology Drive, Resilio, Syncthing, or others. This folder holds the node phonebook and all logs (MidRender logs and DCC stdout logs). Press Save.
 
-![Mid Render Image](docs/images/midrender_EQ0rnOsLs2.png)
-
-### Advanced Setup
-
-#### Tags
-
-Tags are how you filter which DCCs each node can render. You can also influence the "Leader" election process. Tags are comma-separated like: `ae, blend, leader`.
-
-![Mid Render Image](docs/images/midrender_8VMaMk0sEq.png)
-
-##### Options:
-
-- `ae` is the tag used for the provided Adobe After Effect job template. Using this tag will allow After Effects rendering on this node.
-- `blend` is the tag used for the provided Blender job templates.
-- `c4d` is the tag used for the provided Cinema 4d job templates.
-- `leader` is a tag that forces leadership priority to a node. If this node is available, the mesh will recognize its leadership in coordination, but fall back to other nodes if it drops out.
-- `noleader` signifies that you don't want this node to have leadership. It will only fall back to a leadership if it's the only node left alive.
+![MidRender Settings](docs/images/midrender_EQ0rnOsLs2.png)
 
 ---
 
-## Post-Installation
+## Tags
 
-You are ready to render now. You can create a new job in the MidRender Monitor application or install the optional DCC submitters.
+Tags control which DCCs each node can render and influence leader election. Set them as comma-separated values in Settings (e.g. `ae, blend, leader`).
 
+![MidRender Tags](docs/images/midrender_8VMaMk0sEq.png)
 
-### DCC Submitters
+| Tag | Purpose |
+|---|---|
+| `ae` | Enables After Effects rendering on this node. |
+| `blend` | Enables Blender rendering on this node. |
+| `c4d` | Enables Cinema 4D rendering on this node. |
+| `leader` | Forces leadership priority. The mesh prefers this node as coordinator, but falls back to others if it drops out. |
+| `noleader` | Prevents this node from becoming leader unless it's the only one alive. |
 
-Browse to the shared folder you entered into the settings panel.
+---
 
-#### Adobe After Effects
+## DCC Submitters
 
-In `plugins/afterEffects` is `MidRender.jsx`. Install this in your Adobe After Effects `Scripts/ScriptsUI Panels` folder. Press the `Scan Render Queue` to load all active Render Queue items. Set options and press `Submit`. 
+You can submit jobs directly from the MidRender app, or use the optional DCC plugins. Plugin files are in the shared farm folder under `plugins/`.
 
-![Mid Render Image](docs/images/AfterFX_FcOV6mcLiw.png)
+### After Effects
 
+Install `plugins/afterEffects/MidRender.jsx` into your After Effects `Scripts/ScriptUI Panels` folder. Press `Scan Render Queue` to load active items, set options, and press `Submit`.
 
-> [!NOTE] 
-> Chunk size will be honored for all image sequences, but not video outputs. If you are outputting a video, the plugin will automatically set the chunk size to the video's duration so that a single video is rendered (and not multiple video chunks).
-
-#### Blender
-
-To install the Blender submitter, use `Install from disk` in the `Add-ons` setting panel. The plugin will appear in the Render panels.
-
-The MidRender submitter will automatically collect your render output frame range and output settings from the app, but you can toggle and adjust them for export. Press `Submit to Farm`.
-
-![Mid Render Image](docs/images/blender_RQADDXgy9f.png)
-
-#### Cinema 4D
-
-To install the C4d submitter script, browse to your `%appdata%\Maxon\C4dDirectory\library\scripts` folder and copy `MidRender.py` to that location. Run it by selecting MidRender in the `Extensions > User Scripts` menu.
-
-It will pull render paths and frame ranges from your user settings, but you can alter them. Press `Submit to Farm` when ready.
-
-![Mid Render Image](docs/images/Cinema_4D_0cGq7BI1CC.png)
+![After Effects Submitter](docs/images/AfterFX_FcOV6mcLiw.png)
 
 > [!NOTE]
-> I only have one C4d license right now, so I have only been able to test this on one machine. It should work fine distributed on the farm though (famous last words).
+> Chunk size is honored for image sequences, but not video outputs. For video, the plugin automatically sets chunk size to the full duration so a single file is rendered.
 
-## Mimimize to tray
+### Blender
 
-When you close the app, it will minimize to the system tray. Running Mid Render minimized on your nodes is reccomended--it disengages window drawing. It releases resources to a minimal state, keeping only basic communication, coordination, and a lightweight Rust agent to manage CMD processes.
+Use `Install from Disk` in Blender's Add-ons settings. The MidRender submitter appears in the Render panels. It auto-collects your output and frame range settings, but you can adjust them before pressing `Submit to Farm`.
 
-![Mid Render Image](docs/images/explorer_dM0xlpmQs3.png)
+![Blender Submitter](docs/images/blender_RQADDXgy9f.png)
+
+### Cinema 4D
+
+Copy `plugins/cinema4d/MidRender.py` to your `%appdata%\Maxon\<C4D version>\library\scripts` folder. Run it from `Extensions > User Scripts > MidRender`. It pulls render paths and frame ranges from your scene settings. Press `Submit to Farm` when ready.
+
+![Cinema 4D Submitter](docs/images/Cinema_4D_0cGq7BI1CC.png)
+
+> [!NOTE]
+> Cinema 4D has only been tested with a single license so far. It should work fine distributed across the farm though (famous last words).
 
 ---
 
-## Job Template structure
+## Minimize to Tray
 
-Job Templates are explained [here](docs/job-templates.md).
+When you close the app, it minimizes to the system tray. Running MidRender minimized on your render nodes is recommended — it disengages window drawing and releases resources to a minimal state, keeping only communication, coordination, and a lightweight Rust agent to manage render processes.
+
+![System Tray](docs/images/explorer_dM0xlpmQs3.png)
+
+---
+
+## Job Templates
+
+Job templates are JSON files that tell MidRender how to launch a DCC's command-line renderer. They define the executable, argument structure, stdout parsing for progress, and submission defaults.
+
+See the full reference: [Job Template Documentation](docs/job-templates.md)
