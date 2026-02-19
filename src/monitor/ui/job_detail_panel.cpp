@@ -722,13 +722,22 @@ void JobDetailPanel::renderDetailMode()
         if (ImGui::Button("Cancel"))
             m_pendingCancel = true;
     }
-    else if (job.current_state == "completed" || job.current_state == "cancelled")
+    else if (job.current_state == "completed" || job.current_state == "cancelled"
+             || job.current_state == "failed")
     {
-        if (ImGui::Button("Restart"))
-            m_app->requeueJob(m_detailJobId);
+        if (ImGui::Button("Resubmit"))
+            m_pendingResubmit = true;
         ImGui::SameLine();
         if (ImGui::Button("Archive"))
             m_app->archiveJob(m_detailJobId);
+        ImGui::SameLine();
+    }
+
+    // Retry Failed — shown when any chunks have failed
+    if (job.failed_chunks > 0)
+    {
+        if (ImGui::Button("Retry Failed"))
+            m_pendingRetryFailed = true;
         ImGui::SameLine();
     }
 
@@ -764,6 +773,48 @@ void JobDetailPanel::renderDetailMode()
         ImGui::EndPopup();
     }
 
+    if (m_pendingResubmit)
+    {
+        ImGui::OpenPopup("Confirm Resubmit");
+        m_pendingResubmit = false;
+    }
+    if (ImGui::BeginPopupModal("Confirm Resubmit", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::Text("Create a new job from this manifest?");
+        ImGui::Text("The original job will be preserved.");
+        ImGui::Spacing();
+        if (ImGui::Button("Resubmit"))
+        {
+            m_app->resubmitJob(m_detailJobId);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel"))
+            ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+
+    if (m_pendingRetryFailed)
+    {
+        ImGui::OpenPopup("Confirm Retry Failed");
+        m_pendingRetryFailed = false;
+    }
+    if (ImGui::BeginPopupModal("Confirm Retry Failed", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::Text("Re-render %d failed chunks?", job.failed_chunks);
+        ImGui::Text("Completed frames will be preserved.");
+        ImGui::Spacing();
+        if (ImGui::Button("Retry Failed"))
+        {
+            m_app->retryFailedChunks(m_detailJobId);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel"))
+            ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+
     if (m_pendingDelete)
     {
         ImGui::OpenPopup("Confirm Delete");
@@ -794,7 +845,12 @@ void JobDetailPanel::renderFrameGrid(const std::vector<ChunkRow>& chunks, int fS
 
     // Expand chunks to per-frame states
     int totalFrames = fEnd - fStart + 1;
-    struct FrameVis { std::string state = "pending"; std::string assigned_to; int retry_count = 0; };
+    struct FrameVis {
+        std::string state = "pending";
+        std::string assigned_to;
+        int retry_count = 0;
+        std::vector<std::string> failed_on;
+    };
     std::vector<FrameVis> frames(totalFrames);
 
     for (const auto& c : chunks)
@@ -807,6 +863,7 @@ void JobDetailPanel::renderFrameGrid(const std::vector<ChunkRow>& chunks, int fS
                 frames[idx].state = c.state;
                 frames[idx].assigned_to = c.assigned_to;
                 frames[idx].retry_count = c.retry_count;
+                frames[idx].failed_on = c.failed_on;
             }
         }
     }
@@ -874,6 +931,16 @@ void JobDetailPanel::renderFrameGrid(const std::vector<ChunkRow>& chunks, int fS
                 ImGui::Text("Assigned: %s", frames[i].assigned_to.c_str());
             if (frames[i].retry_count > 0)
                 ImGui::Text("Retries: %d", frames[i].retry_count);
+            if (!frames[i].failed_on.empty())
+            {
+                std::string nodes;
+                for (const auto& n : frames[i].failed_on)
+                {
+                    if (!nodes.empty()) nodes += ", ";
+                    nodes += n;
+                }
+                ImGui::Text("Failed on: %s", nodes.c_str());
+            }
             ImGui::EndTooltip();
         }
 

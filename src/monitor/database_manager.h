@@ -23,6 +23,7 @@ struct ChunkRow
     int64_t assigned_at_ms = 0, completed_at_ms = 0;
     int retry_count = 0;
     std::vector<int> completed_frames;  // individual frames completed within this chunk
+    std::vector<std::string> failed_on; // node IDs that failed this chunk (blacklist)
 };
 
 struct JobRow
@@ -68,13 +69,16 @@ public:
     std::optional<std::pair<ChunkRow, std::string/*manifest_json*/>>
         findNextPendingChunk();
     std::optional<std::pair<ChunkRow, std::string/*manifest_json*/>>
-        findNextPendingChunkForNode(const std::vector<std::string>& nodeTags);
+        findNextPendingChunkForNode(const std::vector<std::string>& nodeTags,
+                                    const std::string& nodeId = {});
     bool assignChunk(int64_t chunkId, const std::string& nodeId, int64_t nowMs);
     bool completeChunk(const std::string& jobId, int frameStart, int frameEnd, int64_t nowMs);
-    bool failChunk(const std::string& jobId, int frameStart, int frameEnd, int maxRetries);
+    bool failChunk(const std::string& jobId, int frameStart, int frameEnd,
+                   int maxRetries, const std::string& failingNodeId = {});
     int reassignDeadWorkerChunks(const std::string& deadNodeId);
     bool isJobComplete(const std::string& jobId);
     bool resetAllChunks(const std::string& jobId);
+    bool retryFailedChunks(const std::string& jobId);
 
     // Per-frame completion tracking
     bool addCompletedFrames(const std::string& jobId, int frame);

@@ -174,7 +174,22 @@ void DispatchManager::processReports()
             catch (...) {}
         }
 
-        m_db->failChunk(r.job_id, r.frame_start, r.frame_end, maxRetries);
+        m_db->failChunk(r.job_id, r.frame_start, r.frame_end, maxRetries, r.node_id);
+
+        // Record in machine-level failure tracker
+        if (!r.node_id.empty())
+        {
+            auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            bool wasSuspended = m_failureTracker.isSuspended(r.node_id);
+            m_failureTracker.recordFailure(r.node_id, nowMs);
+            if (!wasSuspended && m_failureTracker.isSuspended(r.node_id))
+            {
+                MonitorLog::instance().warn("dispatch",
+                    "Node " + r.node_id + " suspended — too many failures in 5 minutes");
+            }
+        }
+
         MonitorLog::instance().warn("dispatch",
             "Chunk failed: " + r.job_id + " f" + std::to_string(r.frame_start) +
             "-" + std::to_string(r.frame_end) + " by " + r.node_id + ": " + r.error);
@@ -242,8 +257,12 @@ void DispatchManager::assignWork()
         if (peer.render_state == "rendering")
             continue;
 
-        // Find next pending chunk this peer is eligible for (respects tags_required)
-        auto chunkOpt = m_db->findNextPendingChunkForNode(peer.tags);
+        // Skip suspended nodes (machine-level failure tracking)
+        if (m_failureTracker.isSuspended(peer.node_id))
+            continue;
+
+        // Find next pending chunk this peer is eligible for (respects tags + blacklist)
+        auto chunkOpt = m_db->findNextPendingChunkForNode(peer.tags, peer.node_id);
         if (!chunkOpt.has_value())
             continue; // no compatible work for this peer (other peers may still match)
 
@@ -328,6 +347,71 @@ void DispatchManager::assignWork()
                 m_db->failChunk(chunk.job_id, chunk.frame_start, chunk.frame_end, 999);
             }
         }
+    }
+}
+
+bool DispatchManager::retryFailedChunks(const std::string& jobId)
+{
+    if (!m_db || !m_db->isOpen())
+        return false;
+
+    return m_db->retryFailedChunks(jobId);
+}
+
+std::string DispatchManager::resubmitJob(const std::string& sourceJobId)
+{
+    if (!m_db || !m_db->isOpen())
+        return {};
+
+    auto jobOpt = m_db->getJob(sourceJobId);
+    if (!jobOpt.has_value())
+        return {};
+
+    try
+    {
+        auto manifest = nlohmann::json::parse(jobOpt->manifest_json).get<JobManifest>();
+
+        // Generate new job_id: append "-v2", "-v3", etc.
+        std::string baseSlug = manifest.job_id;
+        // Strip existing -vN suffix
+        auto vpos = baseSlug.rfind("-v");
+        if (vpos != std::string::npos)
+        {
+            bool allDigits = true;
+            for (size_t i = vpos + 2; i < baseSlug.size(); ++i)
+            {
+                if (!std::isdigit(static_cast<unsigned char>(baseSlug[i])))
+                {
+                    allDigits = false;
+                    break;
+                }
+            }
+            if (allDigits && vpos + 2 < baseSlug.size())
+                baseSlug = baseSlug.substr(0, vpos);
+        }
+
+        // Find next available suffix
+        std::string newJobId;
+        for (int suffix = 2; suffix < 1000; ++suffix)
+        {
+            newJobId = baseSlug + "-v" + std::to_string(suffix);
+            if (!m_db->getJob(newJobId).has_value())
+                break;
+        }
+
+        // Update manifest with new job_id and fresh timestamp
+        manifest.job_id = newJobId;
+        manifest.submitted_at_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+
+        // Submit as new job (fresh chunks, zero retry counts, empty failed_on)
+        return submitJob(manifest, jobOpt->priority);
+    }
+    catch (const std::exception& e)
+    {
+        MonitorLog::instance().error("dispatch",
+            std::string("resubmitJob failed: ") + e.what());
+        return {};
     }
 }
 

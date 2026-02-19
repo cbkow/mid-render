@@ -219,6 +219,7 @@ struct DispatchChunk
     int64_t assigned_at_ms = 0;
     int64_t completed_at_ms = 0;
     int retry_count = 0;
+    std::vector<std::string> failed_on; // node IDs that failed this chunk (blacklist)
 };
 
 struct DispatchTable
@@ -530,6 +531,7 @@ inline void to_json(nlohmann::json& j, const DispatchChunk& d)
         {"assigned_at_ms", d.assigned_at_ms},
         {"completed_at_ms", d.completed_at_ms},
         {"retry_count", d.retry_count},
+        {"failed_on", d.failed_on},
     };
 }
 
@@ -542,6 +544,7 @@ inline void from_json(const nlohmann::json& j, DispatchChunk& d)
     if (j.contains("assigned_at_ms"))  j.at("assigned_at_ms").get_to(d.assigned_at_ms);
     if (j.contains("completed_at_ms")) j.at("completed_at_ms").get_to(d.completed_at_ms);
     if (j.contains("retry_count"))     j.at("retry_count").get_to(d.retry_count);
+    if (j.contains("failed_on"))       j.at("failed_on").get_to(d.failed_on);
 }
 
 inline void to_json(nlohmann::json& j, const DispatchTable& dt)

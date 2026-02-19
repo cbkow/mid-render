@@ -57,6 +57,7 @@ private:
     JobInfo m_cachedDetail;
     bool m_hasDetailCache = false;
     bool m_pendingCancel = false, m_pendingDelete = false;
+    bool m_pendingResubmit = false, m_pendingRetryFailed = false;
 
     // Chunk cache for detail view (refreshed every 3s for active jobs)
     std::vector<ChunkRow> m_detailChunks;

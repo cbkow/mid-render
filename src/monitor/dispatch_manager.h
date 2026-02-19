@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/job_types.h"
+#include "monitor/node_failure_tracker.h"
 
 #include <string>
 #include <vector>
@@ -58,6 +59,15 @@ public:
     // Direct submission (main thread, for local leader submit)
     std::string submitJob(const JobManifest& manifest, int priority);
 
+    // Retry only failed chunks (preserves completed work, keeps blacklist)
+    bool retryFailedChunks(const std::string& jobId);
+
+    // Create a new job from an existing job's manifest (clean slate)
+    std::string resubmitJob(const std::string& sourceJobId);
+
+    // Machine-level failure tracking
+    NodeFailureTracker& failureTracker() { return m_failureTracker; }
+
 private:
     void processSubmissions();
     void processReports();
@@ -78,6 +88,8 @@ private:
     std::queue<FailureReport> m_failureQueue;
     std::queue<SubmitRequest> m_submitQueue;
     std::queue<FrameReport> m_frameQueue;
+
+    NodeFailureTracker m_failureTracker;
 
     static constexpr int DISPATCH_INTERVAL_MS = 2000;
     static constexpr int SNAPSHOT_INTERVAL_MS = 30000;

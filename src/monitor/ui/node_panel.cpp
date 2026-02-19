@@ -1,6 +1,7 @@
 #include "monitor/ui/node_panel.h"
 #include "monitor/ui/style.h"
 #include "monitor/monitor_app.h"
+#include "monitor/dispatch_manager.h"
 #include "core/net_utils.h"
 
 #include <imgui.h>
@@ -166,6 +167,27 @@ void NodePanel::render()
                         drawStatusBadge("UDP", ImVec4(0.4f, 0.7f, 1.0f, 1.0f));
                     }
 
+                    // Suspect badge (suspended by failure tracker)
+                    if (m_app->isLeader())
+                    {
+                        auto& tracker = m_app->dispatchManager().failureTracker();
+                        if (tracker.isSuspended(peer.node_id))
+                        {
+                            ImGui::SameLine();
+                            drawStatusBadge("Suspect", ImVec4(1.0f, 0.6f, 0.2f, 1.0f));
+                            if (ImGui::IsItemHovered())
+                            {
+                                auto* record = tracker.getRecord(peer.node_id);
+                                if (record)
+                                {
+                                    ImGui::BeginTooltip();
+                                    ImGui::Text("%d failures — not receiving new work", record->failure_count);
+                                    ImGui::EndTooltip();
+                                }
+                            }
+                        }
+                    }
+
                     // Active job info (if rendering)
                     if (peer.is_alive && peer.render_state == "rendering" && !peer.active_job.empty())
                     {
@@ -233,6 +255,16 @@ void NodePanel::render()
                                 }).detach();
                             }
                         }
+
+                        // Unsuspend button (only leader can unsuspend)
+                        if (m_app->isLeader() &&
+                            m_app->dispatchManager().failureTracker().isSuspended(peer.node_id))
+                        {
+                            ImGui::SameLine();
+                            if (ImGui::SmallButton("Unsuspend"))
+                                m_app->unsuspendNode(peer.node_id);
+                        }
+
                         ImGui::Unindent(16.0f);
                     }
 

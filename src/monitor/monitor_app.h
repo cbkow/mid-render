@@ -66,6 +66,9 @@ public:
     void requeueJob(const std::string& jobId);
     void deleteJob(const std::string& jobId);
     void archiveJob(const std::string& jobId);
+    void retryFailedChunks(const std::string& jobId);
+    std::string resubmitJob(const std::string& jobId);
+    void unsuspendNode(const std::string& nodeId);
 
     // Node state controls
     void setNodeState(NodeState state);

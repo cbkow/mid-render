@@ -68,10 +68,10 @@ inline void from_json(const nlohmann::json& j, Config& c)
 }
 
 // --- Constants ---
-constexpr uint32_t PROTOCOL_VERSION = 1;
+constexpr uint32_t PROTOCOL_VERSION = 2;
 
 #ifndef APP_VERSION
-#define APP_VERSION "0.2.2"
+#define APP_VERSION "0.2.3"
 #endif
 
 } // namespace MR

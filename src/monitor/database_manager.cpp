@@ -61,7 +61,9 @@ void DatabaseManager::createSchema()
             assigned_to TEXT,
             assigned_at_ms INTEGER,
             completed_at_ms INTEGER,
-            retry_count INTEGER NOT NULL DEFAULT 0
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            completed_frames TEXT NOT NULL DEFAULT '[]',
+            failed_on TEXT NOT NULL DEFAULT '[]'
         )
     )");
 
@@ -72,6 +74,13 @@ void DatabaseManager::createSchema()
     try
     {
         m_db->exec("ALTER TABLE chunks ADD COLUMN completed_frames TEXT NOT NULL DEFAULT '[]'");
+    }
+    catch (...) {} // column already exists — safe to ignore
+
+    // Migration: add failed_on column (idempotent)
+    try
+    {
+        m_db->exec("ALTER TABLE chunks ADD COLUMN failed_on TEXT NOT NULL DEFAULT '[]'");
     }
     catch (...) {} // column already exists — safe to ignore
 }
@@ -255,7 +264,7 @@ std::vector<ChunkRow> DatabaseManager::getChunksForJob(const std::string& jobId)
     {
         SQLite::Statement q(*m_db,
             "SELECT id, job_id, frame_start, frame_end, state, assigned_to, "
-            "assigned_at_ms, completed_at_ms, retry_count, completed_frames "
+            "assigned_at_ms, completed_at_ms, retry_count, completed_frames, failed_on "
             "FROM chunks WHERE job_id = ? ORDER BY frame_start ASC");
         q.bind(1, jobId);
 
@@ -279,6 +288,16 @@ std::vector<ChunkRow> DatabaseManager::getChunksForJob(const std::string& jobId)
                 auto arr = nlohmann::json::parse(cfJson);
                 if (arr.is_array())
                     row.completed_frames = arr.get<std::vector<int>>();
+            }
+            catch (...) {}
+
+            // Parse failed_on JSON array
+            std::string foJson = q.getColumn(10).getString();
+            try
+            {
+                auto arr = nlohmann::json::parse(foJson);
+                if (arr.is_array())
+                    row.failed_on = arr.get<std::vector<std::string>>();
             }
             catch (...) {}
 
@@ -330,7 +349,8 @@ DatabaseManager::findNextPendingChunk()
 }
 
 std::optional<std::pair<ChunkRow, std::string>>
-DatabaseManager::findNextPendingChunkForNode(const std::vector<std::string>& nodeTags)
+DatabaseManager::findNextPendingChunkForNode(const std::vector<std::string>& nodeTags,
+                                              const std::string& nodeId)
 {
     try
     {
@@ -370,15 +390,30 @@ DatabaseManager::findNextPendingChunkForNode(const std::vector<std::string>& nod
                 continue; // malformed manifest — skip job
             }
 
-            // Job is eligible — find its first pending chunk
+            // Job is eligible — find its first pending chunk not blacklisted for this node
             SQLite::Statement chunkQ(*m_db,
-                "SELECT id, frame_start, frame_end FROM chunks "
+                "SELECT id, frame_start, frame_end, failed_on FROM chunks "
                 "WHERE job_id = ? AND state = 'pending' "
-                "ORDER BY frame_start ASC LIMIT 1");
+                "ORDER BY frame_start ASC");
             chunkQ.bind(1, jobId);
 
-            if (chunkQ.executeStep())
+            while (chunkQ.executeStep())
             {
+                // Check blacklist: skip if this node is in failed_on
+                if (!nodeId.empty())
+                {
+                    std::string foJson = chunkQ.getColumn(3).getString();
+                    try
+                    {
+                        auto failedOn = nlohmann::json::parse(foJson).get<std::vector<std::string>>();
+                        if (std::find(failedOn.begin(), failedOn.end(), nodeId) != failedOn.end())
+                        {
+                            continue; // blacklisted — try next chunk
+                        }
+                    }
+                    catch (...) {}
+                }
+
                 ChunkRow row;
                 row.id = chunkQ.getColumn(0).getInt64();
                 row.job_id = jobId;
@@ -437,10 +472,42 @@ bool DatabaseManager::completeChunk(const std::string& jobId, int frameStart, in
     }
 }
 
-bool DatabaseManager::failChunk(const std::string& jobId, int frameStart, int frameEnd, int maxRetries)
+bool DatabaseManager::failChunk(const std::string& jobId, int frameStart, int frameEnd,
+                                int maxRetries, const std::string& failingNodeId)
 {
     try
     {
+        // First, append failingNodeId to failed_on if provided and not already present
+        if (!failingNodeId.empty())
+        {
+            SQLite::Statement selQ(*m_db,
+                "SELECT id, failed_on FROM chunks "
+                "WHERE job_id = ? AND frame_start = ? AND frame_end = ? LIMIT 1");
+            selQ.bind(1, jobId);
+            selQ.bind(2, frameStart);
+            selQ.bind(3, frameEnd);
+
+            if (selQ.executeStep())
+            {
+                int64_t chunkId = selQ.getColumn(0).getInt64();
+                std::string foJson = selQ.getColumn(1).getString();
+
+                std::vector<std::string> failedOn;
+                try { failedOn = nlohmann::json::parse(foJson).get<std::vector<std::string>>(); }
+                catch (...) {}
+
+                if (std::find(failedOn.begin(), failedOn.end(), failingNodeId) == failedOn.end())
+                {
+                    failedOn.push_back(failingNodeId);
+                    SQLite::Statement upd(*m_db,
+                        "UPDATE chunks SET failed_on = ? WHERE id = ?");
+                    upd.bind(1, nlohmann::json(failedOn).dump());
+                    upd.bind(2, chunkId);
+                    upd.exec();
+                }
+            }
+        }
+
         // Increment retry_count. If under max retries, reset to pending for retry.
         SQLite::Statement q(*m_db,
             "UPDATE chunks SET "
@@ -510,7 +577,7 @@ bool DatabaseManager::resetAllChunks(const std::string& jobId)
         SQLite::Statement q(*m_db,
             "UPDATE chunks SET state = 'pending', assigned_to = NULL, "
             "assigned_at_ms = NULL, completed_at_ms = NULL, retry_count = 0, "
-            "completed_frames = '[]' "
+            "completed_frames = '[]', failed_on = '[]' "
             "WHERE job_id = ?");
         q.bind(1, jobId);
         return q.exec() > 0;
@@ -518,6 +585,34 @@ bool DatabaseManager::resetAllChunks(const std::string& jobId)
     catch (const std::exception& e)
     {
         MonitorLog::instance().error("db", std::string("resetAllChunks failed: ") + e.what());
+        return false;
+    }
+}
+
+bool DatabaseManager::retryFailedChunks(const std::string& jobId)
+{
+    try
+    {
+        // Reset only failed chunks to pending. Keep failed_on (blacklist persists).
+        SQLite::Statement q(*m_db,
+            "UPDATE chunks SET state = 'pending', assigned_to = NULL, "
+            "assigned_at_ms = NULL, retry_count = 0, completed_frames = '[]' "
+            "WHERE job_id = ? AND state = 'failed'");
+        q.bind(1, jobId);
+        int count = q.exec();
+
+        if (count > 0)
+        {
+            // Ensure job state is active so dispatch picks up the retried chunks
+            updateJobState(jobId, "active");
+            MonitorLog::instance().info("db",
+                "Retried " + std::to_string(count) + " failed chunks for " + jobId);
+        }
+        return count > 0;
+    }
+    catch (const std::exception& e)
+    {
+        MonitorLog::instance().error("db", std::string("retryFailedChunks failed: ") + e.what());
         return false;
     }
 }

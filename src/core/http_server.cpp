@@ -230,6 +230,58 @@ void HttpServer::setupRoutes()
         res.set_content(R"({"status":"ok"})", "application/json");
     });
 
+    // POST /api/jobs/:id/retry-failed -- retry only failed chunks
+    m_server.Post(R"(/api/jobs/([^/]+)/retry-failed)", [this](const httplib::Request& req, httplib::Response& res)
+    {
+        if (!requireLeader(res)) return;
+        std::string jobId = req.matches[1];
+        m_app->retryFailedChunks(jobId);
+        res.set_content(R"({"status":"ok"})", "application/json");
+    });
+
+    // POST /api/jobs/:id/resubmit -- create new job from existing manifest
+    m_server.Post(R"(/api/jobs/([^/]+)/resubmit)", [this](const httplib::Request& req, httplib::Response& res)
+    {
+        if (!requireLeader(res)) return;
+        std::string jobId = req.matches[1];
+        auto newId = m_app->resubmitJob(jobId);
+        if (newId.empty())
+        {
+            res.status = 404;
+            res.set_content(R"({"error":"resubmit_failed"})", "application/json");
+            return;
+        }
+        nlohmann::json body = {{"status", "ok"}, {"job_id", newId}};
+        res.set_content(body.dump(), "application/json");
+    });
+
+    // POST /api/nodes/:id/unsuspend -- clear failure tracking for a node
+    m_server.Post(R"(/api/nodes/([^/]+)/unsuspend)", [this](const httplib::Request& req, httplib::Response& res)
+    {
+        if (!requireLeader(res)) return;
+        std::string nodeId = req.matches[1];
+        m_app->unsuspendNode(nodeId);
+        res.set_content(R"({"status":"ok"})", "application/json");
+    });
+
+    // GET /api/nodes/suspended -- list of suspended nodes with failure counts
+    m_server.Get("/api/nodes/suspended", [this](const httplib::Request&, httplib::Response& res)
+    {
+        if (!requireLeader(res)) return;
+        auto suspended = m_app->dispatchManager().failureTracker().getSuspended();
+        nlohmann::json arr = nlohmann::json::array();
+        for (const auto& [nodeId, record] : suspended)
+        {
+            arr.push_back({
+                {"node_id", nodeId},
+                {"failure_count", record.failure_count},
+                {"first_failure_ms", record.first_failure_ms},
+                {"last_failure_ms", record.last_failure_ms},
+            });
+        }
+        res.set_content(arr.dump(), "application/json");
+    });
+
     // POST /api/dispatch/frame-complete -- worker reports per-frame completions
     m_server.Post("/api/dispatch/frame-complete", [this](const httplib::Request& req, httplib::Response& res)
     {

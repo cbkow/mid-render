@@ -2,7 +2,7 @@
 ; https://jrsoftware.org/isinfo.php
 
 #define MyAppName "MidRender"
-#define MyAppVersion "0.2.2"
+#define MyAppVersion "0.2.3"
 #define MyAppPublisher "cbkow"
 #define MyAppURL "https://github.com/cbkow/midrender"
 #define MyAppExeName "midrender.exe"
@@ -228,5 +228,5 @@ Type: files; Name: "{userstartup}\{#MyAppName}.lnk"
 
 [Messages]
 ; Custom messages
-WelcomeLabel2=This will install [name/ver] on your computer.%n%nMidRender is a render farm coordinator for freelancers, designed for teams of 2-10 machines communicating via a shared filesystem.%n%nIt is recommended that you close all other applications before continuing.
+WelcomeLabel2=This will install [name/ver] on your computer.%n%nMidRender is a render farm coordinator for freelancers and small teams.%n%nIt is recommended that you close all other applications before continuing.
 FinishedLabel=Setup has finished installing [name] on your computer.%n%nThe application may be launched by selecting the installed shortcuts.

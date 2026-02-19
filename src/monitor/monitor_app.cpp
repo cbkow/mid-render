@@ -307,7 +307,8 @@ bool MonitorApp::startFarm()
     if (m_farmRunning)
         return true;
 
-    m_farmPath = std::filesystem::path(m_config.sync_root) / "MidRender-v1";
+    m_farmPath = std::filesystem::path(m_config.sync_root) /
+        ("MidRender-v" + std::to_string(PROTOCOL_VERSION));
     m_farmError.clear();
 
     // Check if sync root exists
@@ -514,7 +515,8 @@ void MonitorApp::reportCompletion(const std::string& jobId, const ChunkRange& ch
                 }
                 catch (...) {}
             }
-            m_databaseManager.failChunk(jobId, chunk.frame_start, chunk.frame_end, maxRetries);
+            m_databaseManager.failChunk(jobId, chunk.frame_start, chunk.frame_end,
+                maxRetries, m_identity.nodeId());
         }
     }
     else
@@ -599,6 +601,8 @@ std::vector<ChunkRow> MonitorApp::getChunksForJob(const std::string& jobId)
             row.retry_count = cj.value("retry_count", 0);
             if (cj.contains("completed_frames") && cj["completed_frames"].is_array())
                 row.completed_frames = cj["completed_frames"].get<std::vector<int>>();
+            if (cj.contains("failed_on") && cj["failed_on"].is_array())
+                row.failed_on = cj["failed_on"].get<std::vector<std::string>>();
             result.push_back(std::move(row));
         }
         return result;
@@ -775,6 +779,7 @@ std::string MonitorApp::getCachedJobDetailJson(const std::string& jobId) const
             {"completed_at_ms", c.completed_at_ms},
             {"retry_count", c.retry_count},
             {"completed_frames", c.completed_frames},
+            {"failed_on", c.failed_on},
         });
     }
     result["chunks"] = chunkArr;
@@ -939,6 +944,92 @@ void MonitorApp::archiveJob(const std::string& jobId)
 
     if (m_selectedJobId == jobId)
         m_selectedJobId.clear();
+}
+
+void MonitorApp::retryFailedChunks(const std::string& jobId)
+{
+    if (isLeader() && m_databaseManager.isOpen())
+    {
+        m_dispatchManager.retryFailedChunks(jobId);
+        MonitorLog::instance().info("job", "Retrying failed chunks: " + jobId);
+    }
+    else
+    {
+        std::string ep = getLeaderEndpoint();
+        if (ep.empty()) return;
+        auto [host, port] = parseEndpoint(ep);
+        if (host.empty()) return;
+        try
+        {
+            httplib::Client cli(host, port);
+            cli.set_connection_timeout(2);
+            cli.set_read_timeout(3);
+            cli.Post("/api/jobs/" + jobId + "/retry-failed", "", "application/json");
+        }
+        catch (...) {}
+    }
+}
+
+std::string MonitorApp::resubmitJob(const std::string& jobId)
+{
+    if (isLeader() && m_databaseManager.isOpen())
+    {
+        auto newId = m_dispatchManager.resubmitJob(jobId);
+        if (!newId.empty())
+        {
+            MonitorLog::instance().info("job", "Resubmitted job: " + jobId + " -> " + newId);
+            selectJob(newId);
+        }
+        return newId;
+    }
+    else
+    {
+        std::string ep = getLeaderEndpoint();
+        if (ep.empty()) return {};
+        auto [host, port] = parseEndpoint(ep);
+        if (host.empty()) return {};
+        try
+        {
+            httplib::Client cli(host, port);
+            cli.set_connection_timeout(2);
+            cli.set_read_timeout(3);
+            auto res = cli.Post("/api/jobs/" + jobId + "/resubmit", "", "application/json");
+            if (res && res->status == 200)
+            {
+                auto body = nlohmann::json::parse(res->body);
+                std::string newId = body.value("job_id", "");
+                if (!newId.empty())
+                    selectJob(newId);
+                return newId;
+            }
+        }
+        catch (...) {}
+    }
+    return {};
+}
+
+void MonitorApp::unsuspendNode(const std::string& nodeId)
+{
+    if (isLeader())
+    {
+        m_dispatchManager.failureTracker().clearNode(nodeId);
+        MonitorLog::instance().info("job", "Unsuspended node: " + nodeId);
+    }
+    else
+    {
+        std::string ep = getLeaderEndpoint();
+        if (ep.empty()) return;
+        auto [host, port] = parseEndpoint(ep);
+        if (host.empty()) return;
+        try
+        {
+            httplib::Client cli(host, port);
+            cli.set_connection_timeout(2);
+            cli.set_read_timeout(3);
+            cli.Post("/api/nodes/" + nodeId + "/unsuspend", "", "application/json");
+        }
+        catch (...) {}
+    }
 }
 
 // --- Node state ---
