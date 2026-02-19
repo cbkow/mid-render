@@ -37,6 +37,7 @@ Tags are how you filter which DCCs each node can render. You can also influence 
 
 - `ae` is the tag used for the provided Adobe After Effect job template. Using this tag will allow After Effects rendering on this node.
 - `blend` is the tag used for the provided Blender job templates.
+- `c4d` is the tag used for the provided Cinema 4d job templates.
 - `leader` is a tag that forces leadership priority to a node. If this node is available, the mesh will recognize its leadership in coordination, but fall back to other nodes if it drops out.
 - `noleader` signifies that you don't want this node to have leadership. It will only fall back to a leadership if it's the only node left alive.
 
@@ -65,11 +66,21 @@ In `plugins/afterEffects` is `MidRender.jsx`. Install this in your Adobe After E
 
 #### Blender
 
+To install the Blender submitter, use `Install from disk` in the `Add-ons` setting panel. The plugin will appear in the Render panels.
+
 The MidRender submitter will automatically collect your render output frame range and output settings from the app, but you can toggle and adjust them for export. Press `Submit to Farm`.
 
 ![Mid Render Image](docs/images/blender_RQADDXgy9f.png)
 
 ---
+
+#### Cinema 4D
+
+To install the C4d submitter script, browse to your `%appdata%\Maxon\C4dDirectory\library\scripts` folder and copy `MidRender.py` to that location. Run it by selecting MidRender in the `Extensions > User Scripts` menu.
+
+It will pull render paths and frame ranges from your user settings, but you can alter them. Press `Submit to Farm` when ready.
+
+![Mid Render Image](docs/images/Cinema_4D_0cGq7BI1CC.png)
 
 ## Mimimize to tray
 
