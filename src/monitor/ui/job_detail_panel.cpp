@@ -880,6 +880,8 @@ void JobDetailPanel::renderFrameGrid(const std::vector<ChunkRow>& chunks, int fS
     }
 
     // Upgrade per-frame states from completed_frames within "assigned" chunks
+    // Frames show as "staged" while the chunk is still assigned (rendered locally,
+    // not yet copied to network). They become "completed" when the chunk completes.
     for (const auto& c : chunks)
     {
         if (c.state == "assigned" && !c.completed_frames.empty())
@@ -888,7 +890,7 @@ void JobDetailPanel::renderFrameGrid(const std::vector<ChunkRow>& chunks, int fS
             {
                 int idx = f - fStart;
                 if (idx >= 0 && idx < totalFrames)
-                    frames[idx].state = "completed";
+                    frames[idx].state = "staged";
             }
         }
     }
@@ -914,6 +916,7 @@ void JobDetailPanel::renderFrameGrid(const std::vector<ChunkRow>& chunks, int fS
         const auto& st = frames[i].state;
         if (st == "assigned")       color = IM_COL32(60, 140, 220, 255);
         else if (st == "completed") color = IM_COL32(60, 180, 60, 255);
+        else if (st == "staged")    color = IM_COL32(60, 180, 60, 120);
         else if (st == "failed")    color = IM_COL32(200, 50, 50, 255);
         else                        color = IM_COL32(64, 64, 64, 255);
 
