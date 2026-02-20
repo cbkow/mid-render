@@ -59,6 +59,21 @@ If you render to a synced folder setup (LucidLink, Dropbox, etc.), you'll want t
 
 ---
 
+## Job Submitting
+
+To submit a job, click on the `New Job` button, then select a job template.
+
+![MidRender Tags](docs/images/midrender_EsF6MqxRNr.png)
+
+Fill out the form. Fields with an asterisk are mandatory; everything else will be ignored or left to DCC settings if left empty. Press Submit.
+
+![MidRender Tags](docs/images/midrender_zosjXAiCNe.png)
+
+> [!NOTE]
+> Chunk size is honored for image sequences, but not video outputs. For video, the plugin automatically sets chunk size to the full duration so a single file is rendered.
+
+---
+
 ## DCC Submitters
 
 You can submit jobs directly from the MidRender app, or use the optional DCC plugins. Plugin files are in the shared farm folder under `plugins/`.
@@ -70,7 +85,7 @@ Install `plugins/afterEffects/MidRender.jsx` into your After Effects `Scripts/Sc
 ![After Effects Submitter](docs/images/AfterFX_FcOV6mcLiw.png)
 
 > [!NOTE]
-> Chunk size is honored for image sequences, but not video outputs. For video, the plugin automatically sets chunk size to the full duration so a single file is rendered.
+> It's very easy to create your own templates with only the fields you want/use. Navigate to your shared folder and duplicate the provided templates in the `templates\examples` folder. Delete flags you don't want and prefill in data. See here for a structural overview: [Job Template Documentation](docs/job-templates.md)
 
 ### Blender
 
