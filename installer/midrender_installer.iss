@@ -2,7 +2,7 @@
 ; https://jrsoftware.org/isinfo.php
 
 #define MyAppName "MidRender"
-#define MyAppVersion "0.2.5"
+#define MyAppVersion "0.2.7"
 #define MyAppPublisher "cbkow"
 #define MyAppURL "https://github.com/cbkow/midrender"
 #define MyAppExeName "midrender.exe"
@@ -64,6 +64,7 @@ Name: "custom"; Description: "Custom installation"; Flags: iscustom
 Name: "core"; Description: "Core application files (Monitor + Agent)"; Types: full custom; Flags: fixed
 Name: "plugins"; Description: "DCC plugins for render submission"
 Name: "plugins\blender"; Description: "Blender addon (MidRender.py)"; Types: full
+Name: "plugins\cinema4d"; Description: "Cinema 4D script (MidRender.py)"; Types: full
 Name: "plugins\aftereffects"; Description: "After Effects script (MidRender.jsx)"; Types: full
 Name: "shortcuts"; Description: "Create shortcuts"
 Name: "shortcuts\desktop"; Description: "Create desktop shortcut"; Types: full
@@ -93,6 +94,7 @@ Source: "..\build\Release\resources\templates\plugins\*"; DestDir: "{app}\resour
 
 ; DCC plugins
 Source: "..\build\Release\resources\plugins\blender\*"; DestDir: "{app}\resources\plugins\blender"; Flags: ignoreversion; Components: plugins\blender
+Source: "..\build\Release\resources\plugins\cinema4d\*"; DestDir: "{app}\resources\plugins\cinema4d"; Flags: ignoreversion; Components: plugins\cinema4d
 Source: "..\build\Release\resources\plugins\afterEffects\*"; DestDir: "{app}\resources\plugins\afterEffects"; Flags: ignoreversion; Components: plugins\aftereffects
 
 ; Documentation
