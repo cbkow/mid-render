@@ -104,6 +104,21 @@ Copy `plugins/cinema4d/MidRender.py` to your `%appdata%\Maxon\<C4D version>\libr
 
 ---
 
+## Job Progress
+
+#### Frame Grid Colors
+
+When a job is submitted, click it in the Jobs panel to monitor its progress. Progress bars show chunk progress. The frame grid represents the current frame progress. In the logs viewer, you can select the current task to see the DCC logs--aggregated from all nodes. In the shared folder, these logs are saved in the file system if you want to inspect them in detail. They will remain until you delete the job in the monitor app.
+
+![System Tray](docs/images/midrender_G1LMygOLCs.png)
+
+| Color | Meaning |
+|---|---|
+| `grey` | Unassigned frames. |
+| `blue` | Assigned frames. |
+| `dark green` | If you have the local staging area enabled in settings, dark green signifies rendered frames, but not yet copied over to your render directory. MidRender copies them only when the entire chunk is complete. |
+| `bright green` | Finished frames. If the local staging area is enabled, these are finished frames copied over to your render folder. |
+
 ## Minimize to Tray
 
 When you close the app, it minimizes to the system tray. Running MidRender minimized on your render nodes is recommended — it disengages window drawing and releases resources to a minimal state, keeping only communication, coordination, and a lightweight Rust agent to manage render processes.
