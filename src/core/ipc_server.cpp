@@ -237,9 +237,10 @@ std::optional<std::string> IpcServer::receive(int timeoutMs)
 
 void IpcServer::disconnect()
 {
-    if (m_pipe != INVALID_HANDLE_VALUE && m_connected)
+    if (m_pipe != INVALID_HANDLE_VALUE)
     {
-        FlushFileBuffers(m_pipe);
+        if (m_connected)
+            FlushFileBuffers(m_pipe);
         DisconnectNamedPipe(m_pipe);
         m_connected = false;
         std::cout << "[IpcServer] Client disconnected" << std::endl;

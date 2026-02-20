@@ -1,6 +1,6 @@
 [package]
 name = "mr-agent"
-version = "0.2.7"
+version = "0.2.8"
 edition = "2021"
 description = "MidRender headless render agent"
 

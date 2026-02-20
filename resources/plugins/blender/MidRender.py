@@ -7,7 +7,7 @@
 bl_info = {
     "name": "MidRender",
     "author": "MidRender",
-    "version": (0, 2, 7),
+    "version": (0, 2, 8),
     "blender": (4, 0, 0),
     "location": "Render Properties > MidRender",
     "description": "Submit render jobs to MidRender farm",
