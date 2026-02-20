@@ -72,6 +72,7 @@ struct TemplateFlag
     std::string flag;               // "-b", "-o", "" (positional)
     std::optional<std::string> value;   // nullopt=standalone, ""=user fills, "{frame}"=runtime
     std::string info;               // UI label
+    std::string help;               // UI description shown below input
     bool editable = false;
     bool required = false;
     std::string type;               // "file" = file picker, "output" = output path, "" = plain text
@@ -375,6 +376,7 @@ inline void to_json(nlohmann::json& j, const TemplateFlag& f)
         {"editable", f.editable},
         {"required", f.required},
     };
+    if (!f.help.empty())   j["help"] = f.help;
     if (!f.type.empty())   j["type"] = f.type;
     if (!f.filter.empty()) j["filter"] = f.filter;
     if (!f.id.empty())     j["id"] = f.id;
@@ -389,6 +391,7 @@ inline void from_json(const nlohmann::json& j, TemplateFlag& f)
     else if (j.contains("value") && j.at("value").is_null())
         f.value = std::nullopt;
     if (j.contains("info"))     j.at("info").get_to(f.info);
+    if (j.contains("help"))     j.at("help").get_to(f.help);
     if (j.contains("editable")) j.at("editable").get_to(f.editable);
     if (j.contains("required")) j.at("required").get_to(f.required);
     if (j.contains("type"))     j.at("type").get_to(f.type);

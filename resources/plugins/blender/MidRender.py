@@ -7,7 +7,7 @@
 bl_info = {
     "name": "MidRender",
     "author": "MidRender",
-    "version": (0, 1, 0),
+    "version": (0, 2, 7),
     "blender": (4, 0, 0),
     "location": "Render Properties > MidRender",
     "description": "Submit render jobs to MidRender farm",
@@ -59,7 +59,7 @@ def get_farm_path():
     config = read_config()
     if not config or not config.get("sync_root"):
         return None
-    farm = os.path.join(config["sync_root"], "MidRender-v1")
+    farm = os.path.join(config["sync_root"], "MidRender-v2")
     if os.path.isdir(farm):
         return farm
     return None

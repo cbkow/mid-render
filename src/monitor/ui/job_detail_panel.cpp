@@ -107,6 +107,27 @@ void JobDetailPanel::render()
     ImGui::End();
 }
 
+// --- Submission helpers ---
+
+// Bold label above an input field.  Appends " *" for required fields.
+static void fieldLabel(const char* text, bool required = false)
+{
+    if (Fonts::bold) ImGui::PushFont(Fonts::bold);
+    if (required)
+        ImGui::TextWrapped("%s *", text);
+    else
+        ImGui::TextWrapped("%s", text);
+    if (Fonts::bold) ImGui::PopFont();
+}
+
+// Description text below an input field — disabled colour, word-wrapped.
+static void fieldHelp(const char* text)
+{
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::TextWrapped("%s", text);
+    ImGui::PopStyleColor();
+}
+
 // --- Submission Mode ---
 
 void JobDetailPanel::onTemplateSelected(int idx)
@@ -211,14 +232,19 @@ void JobDetailPanel::renderSubmissionMode()
 {
     const auto& templates = m_app->cachedTemplates();
 
-    // Template picker
-    ImGui::Text("Template:");
-    ImGui::SameLine();
+    // Width reserved for a "Browse" button placed on the same line as an input.
+    const float browseReserve = ImGui::CalcTextSize("Browse").x
+        + ImGui::GetStyle().FramePadding.x * 2.0f
+        + ImGui::GetStyle().ItemSpacing.x;
+
+    // ── Template ──────────────────────────────────────────────
+    fieldLabel("Template");
     {
         std::string preview = (m_selectedTemplateIdx >= 0 && m_selectedTemplateIdx < (int)templates.size())
             ? templates[m_selectedTemplateIdx].name
             : "Select template...";
 
+        ImGui::SetNextItemWidth(-1);
         if (ImGui::BeginCombo("##TemplatePicker", preview.c_str()))
         {
             for (int i = 0; i < (int)templates.size(); ++i)
@@ -231,9 +257,7 @@ void JobDetailPanel::renderSubmissionMode()
                 if (t.isExample) label += " (example)";
 
                 if (ImGui::Selectable(label.c_str(), selected))
-                {
                     onTemplateSelected(i);
-                }
                 if (selected) ImGui::SetItemDefaultFocus();
             }
             ImGui::EndCombo();
@@ -242,7 +266,8 @@ void JobDetailPanel::renderSubmissionMode()
 
     if (m_selectedTemplateIdx < 0 || m_selectedTemplateIdx >= (int)templates.size())
     {
-        ImGui::TextDisabled("Select a template to begin.");
+        fieldHelp("Choose a job template to begin submission.");
+        ImGui::Separator();
         if (ImGui::Button("Cancel"))
             m_mode = DetailMode::Empty;
         return;
@@ -251,18 +276,18 @@ void JobDetailPanel::renderSubmissionMode()
     const auto& tmpl = templates[m_selectedTemplateIdx];
     ImGui::Separator();
 
-    // Job name
-    ImGui::Text("Job Name:");
-    ImGui::SameLine();
+    // ── Job Name ──────────────────────────────────────────────
+    fieldLabel("Job Name");
     ImGui::SetNextItemWidth(-1);
     ImGui::InputText("##JobName", m_jobNameBuf, sizeof(m_jobNameBuf));
 
-    // Executable path
+    ImGui::Separator();
+
+    // ── Executable ────────────────────────────────────────────
     if (tmpl.cmd.editable)
     {
-        ImGui::Text("%s:", tmpl.cmd.label.empty() ? "Executable" : tmpl.cmd.label.c_str());
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(-60.0f);
+        fieldLabel(tmpl.cmd.label.empty() ? "Executable" : tmpl.cmd.label.c_str());
+        ImGui::SetNextItemWidth(-browseReserve);
         ImGui::InputText("##CmdPath", m_cmdPathBuf, sizeof(m_cmdPathBuf));
         ImGui::SameLine();
         if (ImGui::Button("Browse##Cmd"))
@@ -274,35 +299,28 @@ void JobDetailPanel::renderSubmissionMode()
                 NFD_FreePathU8(outPath);
             }
         }
+        ImGui::Separator();
     }
-
-    ImGui::Separator();
-    ImGui::Text("Flags:");
 
     // Track if any file flag changed (for output pattern re-resolve)
     bool needResolve = false;
 
-    // Editable flags
+    // ── Editable Flags ────────────────────────────────────────
     for (size_t i = 0; i < tmpl.flags.size(); ++i)
     {
         const auto& f = tmpl.flags[i];
         if (!f.editable) continue;
         if (i >= m_flagBufs.size()) continue;
-
-        // Output flags rendered separately
         if (f.type == "output") continue;
 
         std::string label = f.info.empty() ? f.flag : f.info;
-        if (f.required) label += " *";
-
-        ImGui::Text("%s:", label.c_str());
-        ImGui::SameLine();
+        fieldLabel(label.c_str(), f.required);
 
         std::string id = "##Flag" + std::to_string(i);
 
         if (f.type == "file")
         {
-            ImGui::SetNextItemWidth(-60.0f);
+            ImGui::SetNextItemWidth(-browseReserve);
             if (ImGui::InputText(id.c_str(), m_flagBufs[i].data(), m_flagBufs[i].size()))
                 needResolve = true;
             ImGui::SameLine();
@@ -339,24 +357,27 @@ void JobDetailPanel::renderSubmissionMode()
             ImGui::SetNextItemWidth(-1.0f);
             ImGui::InputText(id.c_str(), m_flagBufs[i].data(), m_flagBufs[i].size());
         }
+
+        if (!f.help.empty())
+            fieldHelp(f.help.c_str());
+
+        ImGui::Separator();
     }
 
-    // Output flags (split dir/filename)
+    // ── Output Flags ──────────────────────────────────────────
     for (auto& ob : m_outputBufs)
     {
         if (ob.flagIdx < 0 || ob.flagIdx >= (int)tmpl.flags.size()) continue;
         const auto& f = tmpl.flags[ob.flagIdx];
 
         std::string label = f.info.empty() ? "Output" : f.info;
-        if (f.required) label += " *";
-        ImGui::Text("%s:", label.c_str());
+        fieldLabel(label.c_str(), f.required);
 
         // Directory
+        ImGui::TextDisabled("Directory");
         {
             std::string id = "##OutDir" + std::to_string(ob.flagIdx);
-            ImGui::Text("  Dir:");
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(-60.0f);
+            ImGui::SetNextItemWidth(-browseReserve);
             if (ImGui::InputText(id.c_str(), ob.dirBuf.data(), ob.dirBuf.size()))
                 ob.overridden = true;
             ImGui::SameLine();
@@ -375,10 +396,9 @@ void JobDetailPanel::renderSubmissionMode()
         }
 
         // Filename
+        ImGui::TextDisabled("Filename");
         {
             std::string id = "##OutFile" + std::to_string(ob.flagIdx);
-            ImGui::Text("  File:");
-            ImGui::SameLine();
             ImGui::SetNextItemWidth(-1.0f);
             if (ImGui::InputText(id.c_str(), ob.filenameBuf.data(), ob.filenameBuf.size()))
                 ob.overridden = true;
@@ -390,56 +410,63 @@ void JobDetailPanel::renderSubmissionMode()
             std::string file(ob.filenameBuf.data());
             std::string full;
             if (!dir.empty() && !file.empty())
-            {
                 full = (std::filesystem::path(dir) / file).string();
-            }
             else if (!dir.empty())
-            {
                 full = dir;
-            }
             else
-            {
                 full = file;
-            }
             std::strncpy(m_flagBufs[ob.flagIdx].data(), full.c_str(),
                 m_flagBufs[ob.flagIdx].size() - 1);
         }
+
+        if (!f.help.empty())
+            fieldHelp(f.help.c_str());
+
+        ImGui::Separator();
     }
 
     // Re-resolve output patterns if file inputs changed
     if (needResolve)
         resolveOutputPatterns();
 
-    ImGui::Separator();
-
-    // Frame range / chunk / priority / retries / timeout
-    ImGui::Text("Frame Range:");
-    ImGui::SameLine();
+    // ── Frame Range ───────────────────────────────────────────
+    fieldLabel("Frame Range");
     ImGui::SetNextItemWidth(80.0f);
     ImGui::InputInt("##FrameStart", &m_frameStart, 0);
     ImGui::SameLine();
-    ImGui::Text("-");
+    ImGui::TextDisabled("-");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(80.0f);
     ImGui::InputInt("##FrameEnd", &m_frameEnd, 0);
 
-    ImGui::Text("Chunk Size:");
-    ImGui::SameLine();
+    ImGui::Separator();
+
+    // ── Chunk Size ────────────────────────────────────────────
+    fieldLabel("Chunk Size");
     ImGui::SetNextItemWidth(80.0f);
     ImGui::InputInt("##ChunkSize", &m_chunkSize, 0);
     if (m_chunkSize < 1) m_chunkSize = 1;
+    fieldHelp("Number of frames each render task will process.");
 
-    ImGui::Text("Priority:");
-    ImGui::SameLine();
+    ImGui::Separator();
+
+    // ── Priority ──────────────────────────────────────────────
+    fieldLabel("Priority");
     ImGui::SetNextItemWidth(80.0f);
     ImGui::InputInt("##Priority", &m_priority, 0);
+    fieldHelp("Higher values are rendered first (1\xe2\x80\x93""100).");
 
-    ImGui::Text("Max Retries:");
-    ImGui::SameLine();
+    ImGui::Separator();
+
+    // ── Max Retries ───────────────────────────────────────────
+    fieldLabel("Max Retries");
     ImGui::SetNextItemWidth(80.0f);
     ImGui::InputInt("##MaxRetries", &m_maxRetries, 0);
     if (m_maxRetries < 0) m_maxRetries = 0;
 
+    ImGui::Separator();
+
+    // ── Timeout ───────────────────────────────────────────────
     ImGui::Checkbox("Timeout", &m_hasTimeout);
     if (m_hasTimeout)
     {
@@ -447,12 +474,13 @@ void JobDetailPanel::renderSubmissionMode()
         ImGui::SetNextItemWidth(80.0f);
         ImGui::InputInt("##Timeout", &m_timeout, 0);
         ImGui::SameLine();
-        ImGui::Text("seconds");
+        ImGui::TextDisabled("seconds");
     }
+    fieldHelp("Maximum time per chunk before it is killed and retried.");
 
-    // Command preview
+    // ── Command Preview ───────────────────────────────────────
     ImGui::Separator();
-    ImGui::Text("Command Preview:");
+    fieldLabel("Command Preview");
     {
         std::vector<std::string> flagVals;
         for (size_t i = 0; i < tmpl.flags.size(); ++i)
@@ -462,7 +490,6 @@ void JobDetailPanel::renderSubmissionMode()
             else
                 flagVals.push_back("");
         }
-        // buildCommandPreview is a const method; use a temp TemplateManager
         TemplateManager previewTm;
         std::string preview = previewTm.buildCommandPreview(tmpl, flagVals, m_cmdPathBuf);
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.8f, 1.0f, 1.0f));
@@ -470,7 +497,7 @@ void JobDetailPanel::renderSubmissionMode()
         ImGui::PopStyleColor();
     }
 
-    // Validation errors
+    // ── Validation Errors ─────────────────────────────────────
     if (!m_errors.empty())
     {
         ImGui::Separator();
@@ -512,7 +539,7 @@ void JobDetailPanel::renderSubmissionMode()
         }
     }
 
-    // Submit / Cancel buttons
+    // ── Submit / Cancel ───────────────────────────────────────
     if (m_asyncSubmitting)
     {
         ImGui::TextDisabled("Submitting...");

@@ -149,7 +149,7 @@
         }
 
         // Check farm exists (for template scanning validation)
-        var farmDir = new Folder(syncRoot + "/MidRender-v1");
+        var farmDir = new Folder(syncRoot + "/MidRender-v2");
         if (!farmDir.exists) {
             setStatus("Farm not initialized.");
             submitBtn.enabled = false;
