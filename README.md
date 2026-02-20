@@ -1,6 +1,6 @@
 # MidRender
 
-A lightweight render farm coordinator for small/medium VFX teams and freelancers.
+A lightweight render farm coordinator for small VFX teams and freelancers.
 
 ![MidRender](docs/images/midrender_iyinJkrW2D.png)
 
