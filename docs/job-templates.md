@@ -123,7 +123,7 @@ The common pattern is a **flag/value pair** across two entries: a non-editable f
 | `editable` | `bool` | `false` | Whether the user can modify this value at submission time. |
 | `required` | `bool` | `false` | If `true` and `editable`, submission fails when left empty. |
 | `type` | `string` | `""` | `"file"` = shows a file picker. `"output"` = output path (used for output directory tracking and local staging). `""` = plain text input. |
-| `filter` | `string` | `""` | File extension filter for the file picker (e.g. `"blend"`, `"c4d"`, `"ae"`). Only relevant when `type` is `"file"`. |
+| `filter` | `string` | `""` | File extension filter for the file picker (e.g. `"blend"`, `"c4d"`, `"aep"`). Only relevant when `type` is `"file"`. |
 | `id` | `string` | `""` | Identifier for cross-referencing. Other flags' `default_pattern` can reference this value via `{flag:id}`. |
 | `default_pattern` | `string?` | `null` | Auto-resolve pattern for the value. Evaluated at submission time (see Pattern Tokens below). |
 
